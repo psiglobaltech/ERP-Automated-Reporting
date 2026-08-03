@@ -1,15 +1,15 @@
 import { Request, Response, NextFunction } from "express";
 import { getCachedUid } from "../services/authServices";
-import { getSaleOrderQuoteData, getInvoiceData } from "../services/odooServices";
-import { generateInvoicePdf, generateSaleOrderPdf } from "../services/quotePdfService";
+import { getSaleOrderQuoteData, getInvoiceData, getPurchaseOrder } from "../services/odooServices";
+import { generateInvoicePdf, generatePurchasePdf, generateSaleOrderPdf } from "../services/quotePdfService";
 
-type docTypes = "draft" | "invoice" | "sale";
+type docTypes = "draft" | "invoice" | "sale" | "purchase-order";
 export async function downloadSaleOrderQuotePdf(req: Request, res: Response, next: NextFunction) {
   try {
     const docId = Number(req.params.docId);
     const rawDocType = req.params.docChoice as string;
 
-    if (rawDocType !== "draft" && rawDocType !== "invoice" && rawDocType !== "sale") {
+    if (rawDocType !== "draft" && rawDocType !== "invoice" && rawDocType !== "sale" && rawDocType !== "purchase-order") {
       return res.status(400).json({ error: "Invalid document type requested" });
     }
 
@@ -81,6 +81,19 @@ export async function downloadSaleOrderQuotePdf(req: Request, res: Response, nex
         };
         const pdf = await generateSaleOrderPdf(pdfData, isSale);
         const filename = `Sale Order-${safeFilename(quoteData.document.name)}.pdf`;
+        return { pdf, filename };
+      },
+      "purchase-order": async (uid, dataId) => {
+        const quoteData = await getPurchaseOrder(uid, dataId);
+        const pdfData = {
+          document: quoteData.document,
+          partner: quoteData.partner,
+          company: quoteData.company,
+          lines: quoteData.lines,
+          groupedLines: quoteData.groupedLines,
+        };
+        const pdf = await generatePurchasePdf(pdfData);
+        const filename = `Purchase Order-${safeFilename(quoteData.document.name)}.pdf`;
         return { pdf, filename };
       },
     };

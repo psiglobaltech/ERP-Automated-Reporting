@@ -27,4 +27,3 @@ export type AppendParams = {
   namedRange: string;
   data: number[];
 };
-

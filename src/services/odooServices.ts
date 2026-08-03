@@ -1,6 +1,20 @@
 // import { execute, authenticate } from "../odoo/odooRpc";
 import { UserSales, DailyReport } from "../types/odoo.type";
-import { SaleOrderData, InvoiceData, DocumentLineGroup, OdooDocumentLine, OdooPartner, OdooCompany, OdooSaleOrder, OdooSaleOrderLine, OdooInvoice, OdooInvoiceLine } from "../types/document.type";
+import {
+  SaleOrderData,
+  InvoiceData,
+  DocumentLineGroup,
+  OdooDocumentLine,
+  OdooPartner,
+  OdooCompany,
+  OdooSaleOrder,
+  OdooSaleOrderLine,
+  OdooInvoice,
+  OdooInvoiceLine,
+  PurchaseOrderData,
+  OdooPurchaseOrder,
+  OdooPurchaseOrderLine,
+} from "../types/document.type";
 
 import fetch from "node-fetch";
 import { JsonRpcResponse } from "../types/odoo.type";
@@ -58,6 +72,7 @@ export async function jsonRpc<T>(payload: object): Promise<T> {
   });
 
   const data: JsonRpcResponse<T> = await res.json();
+  // console.log(data);
 
   if (data.error) {
     throw new Error(JSON.stringify(data.error, null, 2));
@@ -124,17 +139,23 @@ export async function writeSpreadsheet(dates: string[], emailSentVal: number[], 
   } catch (error) {}
 }
 
+/**
+ * @param uid - uid odoo from API authentication
+ * @param saleOderId - document id for sales order or quotation in Odoo
+ * @returns The final discounted price rounded to the nearest cent.
+ */
 export async function getSaleOrderQuoteData(uid: number, saleOrderId: number): Promise<SaleOrderData> {
   const orders = await execute<OdooSaleOrder[]>(uid, "sale.order", "read", [[saleOrderId]], {
     fields: ["id", "name", "state", "date_order", "validity_date", "partner_id", "company_id", "currency_id", "user_id", "amount_untaxed", "amount_tax", "amount_total", "order_line", "note", "payment_term_id", "incoterm"],
   });
 
+  //extract one to validate the existence of the record
   const order = orders[0];
-
   if (!order) {
     throw new Error(`Sales Order with ID ${saleOrderId} was not found`);
   }
 
+  //extract many2one fields in the odoo (partner and company fields, e.g [42, "john doe"])
   const partnerId = Array.isArray(order.partner_id) ? order.partner_id[0] : null;
   const companyId = Array.isArray(order.company_id) ? order.company_id[0] : null;
 
@@ -158,6 +179,26 @@ export async function getSaleOrderQuoteData(uid: number, saleOrderId: number): P
     fields: ["id", "sequence", "display_type", "name", "product_id", "product_uom_qty", "product_uom_id", "price_unit", "discount", "price_subtotal", "price_total"],
   });
 
+  const allTaxIds = Array.from(new Set(lines.flatMap((line) => line.tax_id || [])));
+  let taxMap = new Map<number, string>();
+  if (allTaxIds.length > 0) {
+    const taxes = await execute<{ id: number; name: string }[]>(uid, "account.tax", "read", [allTaxIds], {
+      fields: ["id", "name"],
+    });
+    taxes.forEach((t) => taxMap.set(t.id, t.name));
+  }
+
+  for (const line of lines) {
+    if (line.tax_id && Array.isArray(line.tax_id)) {
+      // For sale order, the field is named tax_id in standard Odoo but is a many2many
+      line.tax_ids = line.tax_id as any;
+      line.tax_names = (line.tax_ids?.map((id) => taxMap.get(id)).filter(Boolean) ?? []) as string[];
+    } else {
+      line.tax_names = [];
+    }
+  }
+
+  //sort product order to be the same with the visual in Odoo
   lines.sort((a, b) => a.sequence - b.sequence || a.id - b.id);
 
   const groupedLines: DocumentLineGroup<OdooSaleOrderLine>[] = groupProductLinesWithNotes(lines);
@@ -223,8 +264,25 @@ export async function getInvoiceData(uid: number, dataId: number): Promise<Invoi
     : null;
 
   const lines = await execute<OdooInvoiceLine[]>(uid, "account.move.line", "read", [invoice.invoice_line_ids], {
-    fields: ["id", "sequence", "display_type", "name", "product_id", "quantity", "product_uom_id", "price_unit", "discount", "price_subtotal", "price_total"],
+    fields: ["id", "sequence", "display_type", "name", "product_id", "quantity", "product_uom_id", "price_unit", "discount", "price_subtotal", "price_total", "tax_ids"],
   });
+
+  const allTaxIdsInvoice = Array.from(new Set(lines.flatMap((line) => line.tax_ids || [])));
+  let taxMapInvoice = new Map<number, string>();
+  if (allTaxIdsInvoice.length > 0) {
+    const taxes = await execute<{ id: number; name: string }[]>(uid, "account.tax", "read", [allTaxIdsInvoice], {
+      fields: ["id", "name"],
+    });
+    taxes.forEach((t) => taxMapInvoice.set(t.id, t.name));
+  }
+
+  for (const line of lines) {
+    if (line.tax_ids && Array.isArray(line.tax_ids)) {
+      line.tax_names = line.tax_ids.map((id) => taxMapInvoice.get(id)).filter(Boolean) as string[];
+    } else {
+      line.tax_names = [];
+    }
+  }
 
   lines.sort((a, b) => a.sequence - b.sequence || a.id - b.id);
 
@@ -232,6 +290,89 @@ export async function getInvoiceData(uid: number, dataId: number): Promise<Invoi
 
   return {
     document: invoice,
+    partner,
+    company,
+    lines,
+    groupedLines,
+  };
+}
+
+export async function getPurchaseOrder(uid: number, dataId: number): Promise<PurchaseOrderData> {
+  const purchases = await execute<OdooPurchaseOrder[]>(uid, "purchase.order", "read", [[dataId]], {
+    fields: [
+      "id",
+      "name",
+      "state",
+      "invoice_status",
+      "date_order",
+      "date_planned",
+      "partner_id",
+      "company_id",
+      "currency_id",
+      "user_id",
+      "amount_untaxed",
+      "amount_tax",
+      "amount_total",
+      "order_line",
+      "payment_term_id",
+      "incoterm_id",
+      "origin",
+    ],
+  });
+
+  const purchase = purchases[0];
+
+  if (!purchase) {
+    throw new Error(`Purchase Order with ID ${dataId} was not found`);
+  }
+
+  const partnerId = Array.isArray(purchase.partner_id) ? purchase.partner_id[0] : null;
+  const companyId = Array.isArray(purchase.company_id) ? purchase.company_id[0] : null;
+
+  const partner = partnerId
+    ? ((
+        await execute<OdooPartner[]>(uid, "res.partner", "read", [[partnerId]], {
+          fields: ["id", "name", "street", "street2", "city", "zip", "state_id", "country_id", "contact_address", "vat"],
+        })
+      )[0] ?? null)
+    : null;
+
+  const company = companyId
+    ? ((
+        await execute<OdooCompany[]>(uid, "res.company", "read", [[companyId]], {
+          fields: ["id", "name", "street", "street2", "city", "zip", "country_id", "phone", "email", "website", "vat", "logo"],
+        })
+      )[0] ?? null)
+    : null;
+
+  const lines = await execute<OdooPurchaseOrderLine[]>(uid, "purchase.order.line", "read", [purchase.order_line], {
+    fields: ["id", "sequence", "display_type", "name", "product_id", "product_qty", "product_uom_id", "price_unit", "price_subtotal", "price_total", "tax_ids", "discount"],
+    // 'discount' does not exist on purchase.order.line by default in standard Odoo unless a specific module is installed.
+  });
+
+  const allTaxIds = Array.from(new Set(lines.flatMap((line) => line.tax_ids || [])));
+  let taxMap = new Map<number, string>();
+  if (allTaxIds.length > 0) {
+    const taxes = await execute<{ id: number; name: string }[]>(uid, "account.tax", "read", [allTaxIds], {
+      fields: ["id", "name"],
+    });
+    taxes.forEach((t) => taxMap.set(t.id, t.name));
+  }
+
+  for (const line of lines) {
+    if (line.tax_ids && Array.isArray(line.tax_ids)) {
+      line.tax_names = line.tax_ids.map((id) => taxMap.get(id)).filter(Boolean) as string[];
+    } else {
+      line.tax_names = [];
+    }
+  }
+
+  lines.sort((a, b) => a.sequence - b.sequence || a.id - b.id);
+
+  const groupedLines: DocumentLineGroup<OdooPurchaseOrderLine>[] = groupProductLinesWithNotes(lines);
+
+  return {
+    document: purchase,
     partner,
     company,
     lines,

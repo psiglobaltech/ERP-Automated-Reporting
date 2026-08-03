@@ -97,6 +97,7 @@ export type OdooPurchaseOrder = OdooDocument & {
   date_order: string;
 
   partner_ref?: string;
+  date_planned?: string;
 
   user_id: OdooMany2One;
 
@@ -119,6 +120,10 @@ export type OdooInvoiceLine = OdooDocumentLine & {
   price_subtotal: number;
 
   price_total: number;
+
+  tax_ids?: number[];
+
+  tax_names?: string[];
 };
 
 export type OdooPurchaseOrderLine = OdooDocumentLine & {
@@ -131,6 +136,12 @@ export type OdooPurchaseOrderLine = OdooDocumentLine & {
   price_unit: number;
 
   price_subtotal: number;
+
+  tax_ids?: number[];
+
+  tax_names?: string[];
+
+  discount: number;
 };
 
 export type DocumentLineGroup<T extends OdooDocumentLine> =
@@ -169,7 +180,11 @@ export type OdooSaleOrderLine = {
   discount: number;
   price_subtotal: number;
   price_total: number;
+  tax_id?: number[];
+  tax_ids?: number[];
+  tax_names?: string[];
 };
+
 export type SaleOrderData = DocumentData<OdooSaleOrder, OdooSaleOrderLine>;
 export type InvoiceData = DocumentData<OdooInvoice, OdooInvoiceLine>;
 export type PurchaseOrderData = DocumentData<OdooPurchaseOrder, OdooPurchaseOrderLine>;
