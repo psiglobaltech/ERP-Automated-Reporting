@@ -347,47 +347,62 @@ function renderQuoteHtml(data: SaleOrderData, isSale: boolean): string {
       page-break-inside: avoid;
     }
 
-    .totals-wrapper {
-      width: 42%;
-      margin-left: auto;
-      margin-top: 6mm;
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: 12px;
-      break-inside: avoid;
-      page-break-inside: avoid;
-    }
-
     .totals-table {
       width: 100%;
       border-collapse: collapse;
-      border: 1px solid #0f2b5b;
+      border: 1px solid #000000;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
     }
 
     .totals-table td {
       padding: 8px 12px;
-      border: 1px solid #0f2b5b;
+      border: 1px solid #000000;
     }
 
     .totals-table .total-label {  
-    font-weight: 600;
-    color: #223247;
-   }
-
-   .totals-table .value {
-    text-align: right;
-    white-space: nowrap;
+      font-weight: 600;
+      color: #223247;
     }
 
-    .totals-table .grand-total-label,
-    .totals-table .grand-total-value {
+    .totals-table .value {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .totals-table .grand-total-label {
       background: #0f2b5b;
       color: #fff;
       font-weight: 700;
-      border: 1px solid #ffffff;
+      border-top: 1px solid #ffffff;
+      border-bottom: 1px solid #ffffff;
+      border-left: 1px solid #000000;
+      border-right: 1px solid #ffffff;
     }
 
-    .totals-table .grand-total-value {
+      .totals-table .grand-total-value {
+      background: #0f2b5b;
+      color: #fff;
+      font-weight: 700;
       text-align: right;
+      border-top: 1px solid #ffffff;
+      border-bottom: 1px solid #ffffff;
+      border-left: 1px solid #ffffff;
+      border-right: 1px solid #000000;
+    }
+
+    .totals-table tr:last-child .grand-total-label {
+      border-top: 1px solid #ffffff;
+      border-bottom: 1px solid #000000;
+      border-left: 1px solid #000000;
+      border-right: 1px solid #ffffff;
+    }
+
+    .totals-table tr:last-child .grand-total-value {
+      border-top: 1px solid #ffffff;
+      border-bottom: 1px solid #000000;
+      border-left: 1px solid #ffffff;
+      border-right: 1px solid #000000;
     }
 
     .terms {
@@ -395,7 +410,7 @@ function renderQuoteHtml(data: SaleOrderData, isSale: boolean): string {
       font-family: Arial, Helvetica, sans-serif;
       font-size: 12px;
       line-height: 1.45;
-      white-space: pre-line;
+      white-space: normal; /* Changed from pre-line to fix unwanted line breaks */
       break-inside: avoid;
       page-break-inside: avoid;
     }
@@ -501,61 +516,67 @@ function renderQuoteHtml(data: SaleOrderData, isSale: boolean): string {
             </div>
 
 
-            <section class="totals-wrapper">
-                <table class="totals-table">
-                  <tr>
-                    <td class="label">Untaxed Amount</td>
-                    <td class="value">${formatCurrency(document.amount_untaxed, document.currency_id)}</td>
-                  </tr>
+            <table style="width: 100%; border: none; border-collapse: collapse; margin-top: 6mm; page-break-inside: avoid;">
+              <tr>
+                <td style="width: 58%; border: none; padding: 0;"></td>
+                <td style="width: 42%; border: none; padding: 0; vertical-align: top;">
+                  <table class="totals-table">
+                    <tr>
+                      <td class="label">Untaxed Amount</td>
+                      <td class="value">${formatCurrency(document.amount_untaxed, document.currency_id)}</td>
+                    </tr>
 
-                  <tr>
-                    <td class="label">Taxes</td>
-                    <td class="value">${formatCurrency(document.amount_tax, document.currency_id)}</td>
-                  </tr>
+                    <tr>
+                      <td class="label">Taxes</td>
+                      <td class="value">${formatCurrency(document.amount_tax, document.currency_id)}</td>
+                    </tr>
 
-                ${(() => {
-                  const airLine = groupedLines.find((g) => g.type === "product" && "line" in g && /\bshipping\b.*\bair\b|\bair\b.*\bshipping\b/i.test((g as any).line?.name || ""));
+                  ${(() => {
+                    const airLine = groupedLines.find((g) => g.type === "product" && "line" in g && /\bshipping\b.*\bair\b|\bair\b.*\bshipping\b/i.test((g as any).line?.name || ""));
 
-                  const seaLine = groupedLines.find((g) => g.type === "product" && "line" in g && /\bshipping\b.*\bsea\b|\bsea\b.*\bshipping\b/i.test((g as any).line?.name || ""));
+                    const seaLine = groupedLines.find((g) => g.type === "product" && "line" in g && /\bshipping\b.*\bsea\b|\bsea\b.*\bshipping\b/i.test((g as any).line?.name || ""));
 
-                  if (!airLine && !seaLine) return "";
+                    // 1. If neither Air nor Sea exist, render ONLY the standard Total row
+                    if (!airLine && !seaLine) {
+                      return `<tr>
+                        <td class="grand-total-label">Total</td>
+                        <td class="grand-total-value">
+                          ${formatCurrency(document.amount_total, document.currency_id)}
+                        </td>
+                      </tr>`;
+                    }
 
-                  const airPrice = airLine && airLine.type === "product" ? airLine.line.price_total || 0 : 0;
-                  const seaPrice = seaLine && seaLine.type === "product" ? seaLine.line.price_total || 0 : 0;
+                    // 2. Otherwise, calculate Air/Sea and render ONLY those (omitting standard Total)
+                    const airPrice = airLine && airLine.type === "product" ? airLine.line.price_total || 0 : 0;
+                    const seaPrice = seaLine && seaLine.type === "product" ? seaLine.line.price_total || 0 : 0;
+                    const baseTotal = document.amount_total - airPrice - seaPrice;
 
-                  const baseTotal = document.amount_total - airPrice - seaPrice;
+                    let html = "";
 
-                  let html = "";
+                    if (airLine) {
+                      html += `<tr>
+                        <td class="grand-total-label">Total by Air</td>
+                        <td class="grand-total-value">
+                          ${formatCurrency(baseTotal + airPrice, document.currency_id)}
+                        </td>
+                      </tr>`;
+                    }
 
-                  if (airLine) {
-                    html += `<tr>
-                      <td class="grand-total-label">Total by Air</td>
-                      <td class="grand-total-value">
-                        ${formatCurrency(baseTotal + airPrice, document.currency_id)}
-                      </td>
-                    </tr>`;
-                  }
+                    if (seaLine) {
+                      html += `<tr>
+                        <td class="grand-total-label">Total by Sea</td>
+                        <td class="grand-total-value">
+                          ${formatCurrency(baseTotal + seaPrice, document.currency_id)}
+                        </td>
+                      </tr>`;
+                    }
 
-                  if (seaLine) {
-                    html += `<tr>
-                      <td class="grand-total-label">Total by Sea</td>
-                      <td class="grand-total-value">
-                        ${formatCurrency(baseTotal + seaPrice, document.currency_id)}
-                      </td>
-                    </tr>`;
-                  }
-
-                  return html;
-                })()}
-
-                  <tr>
-                    <td class="grand-total-label">Total</td>
-                    <td class="grand-total-value">
-                      ${formatCurrency(document.amount_total, document.currency_id)}
-                    </td>
-                  </tr>
-                </table>
-             </section>
+                    return html;
+                  })()}
+                  </table>
+                </td>
+              </tr>
+            </table>
 
             ${renderTerms(order.note)}
           </main>
