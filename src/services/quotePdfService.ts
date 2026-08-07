@@ -1254,10 +1254,32 @@ function formatCurrency(value: number, currency: OdooMany2One): string {
 
   let symbol = "$";
 
-  if (currencyName.toLowerCase().includes("idr")) {
-    symbol = "Rp";
-  } else if (currencyName.toLowerCase().includes("usd")) {
-    symbol = "$";
+  // if (currencyName.toLowerCase().includes("idr")) {
+  //   symbol = "Rp";
+  // } else if (currencyName.toLowerCase().includes("usd")) {
+  //   symbol = "$";
+  // }
+  switch (currencyName.toLowerCase()) {
+    case "idr": {
+      symbol = "Rp";
+      break;
+    }
+    case "usd": {
+      symbol = "$";
+      break;
+    }
+    case "cny": {
+      symbol = "¥";
+      break;
+    }
+    case "myr": {
+      symbol = "RM";
+      break;
+    }
+    case "thb": {
+      symbol = "฿";
+      break;
+    }
   }
 
   return `${symbol} ${new Intl.NumberFormat("en-US", {

@@ -144,6 +144,24 @@ export type OdooPurchaseOrderLine = OdooDocumentLine & {
   discount: number;
 };
 
+export type OdooSaleOrderLine = {
+  id: number;
+  sequence: number;
+  display_type: false | "line_section" | "line_note";
+  name: string;
+  product_id: OdooMany2One;
+  product_uom_qty: number;
+  product_uom?: OdooMany2One;
+  product_uom_id?: OdooMany2One;
+  price_unit: number;
+  discount: number;
+  price_subtotal: number;
+  price_total: number;
+  tax_id?: number[];
+  tax_ids?: number[];
+  tax_names?: string[];
+};
+
 export type DocumentLineGroup<T extends OdooDocumentLine> =
   | {
       type: "section";
@@ -167,23 +185,7 @@ export type DocumentData<TDocument, TLine extends OdooDocumentLine> = {
   groupedLines: DocumentLineGroup<TLine>[];
 };
 
-export type OdooSaleOrderLine = {
-  id: number;
-  sequence: number;
-  display_type: false | "line_section" | "line_note";
-  name: string;
-  product_id: OdooMany2One;
-  product_uom_qty: number;
-  product_uom?: OdooMany2One;
-  product_uom_id?: OdooMany2One;
-  price_unit: number;
-  discount: number;
-  price_subtotal: number;
-  price_total: number;
-  tax_id?: number[];
-  tax_ids?: number[];
-  tax_names?: string[];
-};
+
 
 export type SaleOrderData = DocumentData<OdooSaleOrder, OdooSaleOrderLine>;
 export type InvoiceData = DocumentData<OdooInvoice, OdooInvoiceLine>;
