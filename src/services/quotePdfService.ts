@@ -744,7 +744,7 @@ function renderInvoiceHtml(data: DocumentData<OdooInvoice, OdooInvoiceLine>): st
                   <div class="info-value">${escapeHtml(document.invoice_origin || "—")}</div>
                 </div>
                 <div>
-                  <div class="info-label">Reference</div>
+                  <div class="info-label">PO Reference</div>
                   <div class="info-value">${escapeHtml(document.ref || "—")}</div>
                 </div>
                 ${
