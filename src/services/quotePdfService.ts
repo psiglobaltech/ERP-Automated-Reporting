@@ -16,6 +16,891 @@ export async function generatePurchasePdf(purchaseOrderData: DocumentData<OdooPu
   return renderHtmlToPdf(html);
 }
 
+/**
+ * Generates a quotation PDF identical to {@link generateSaleOrderPdf} but with
+ * a signature block appended after the Remarks section.  Both the Remarks text
+ * and the signature box live inside a single `break-inside: avoid` wrapper, so
+ * they always flow to the next page together – the signature block is never
+ * stranded alone on a new page.
+ *
+ * @param signerImageSrc - Optional base64 data-URI (or URL) of the stamp/signature
+ *   image to embed inside the sign block, e.g.
+ *   `"data:image/png;base64,<base64string>"`.  When omitted the image area is
+ *   left empty (transparent) so the space is reserved but invisible.
+ */
+export async function generateQuoteWithSignaturePdf(quoteData: SaleOrderData, isSale: boolean, signerImageSrc?: string): Promise<Buffer> {
+  const html = renderQuoteWithSignatureHtml(quoteData, isSale, signerImageSrc);
+  return renderHtmlToPdf(html);
+}
+
+/**
+ * Generates an invoice PDF identical to generateInvoicePdf but with
+ * a signature block appended after the totals summary.
+ *
+ * @param signerImageSrc - Optional base64 data-URI (or URL) of the stamp/signature
+ *   image. When omitted, the space is reserved but left empty.
+ */
+export async function generateInvoiceWithSignaturePdf(invoiceData: DocumentData<OdooInvoice, OdooInvoiceLine>, signerImageSrc?: string): Promise<Buffer> {
+  const html = renderInvoiceWithSignatureHtml(invoiceData, signerImageSrc);
+  return renderHtmlToPdf(html);
+}
+
+function renderInvoiceWithSignatureHtml(data: DocumentData<OdooInvoice, OdooInvoiceLine>, signerImageSrc?: string): string {
+  const { document, partner, company, groupedLines } = data;
+
+  const companyName = company?.name || "PT PCBA Semiconductor International";
+  const logoSrc = company?.logo ? `data:image/png;base64,${company.logo}` : "/assets/psi-logo.png";
+  const companyAddressLines = [companyName, company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia`];
+  const partnerAddressLines = getPartnerAddressLines(partner);
+
+  return `<!doctype html>
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>${escapeHtml(document.name)}</title>
+      <style>
+        @page { size: A4; margin: 0; }
+        * { box-sizing: border-box; }
+        html, body {
+          margin: 0; padding: 0; color: #222;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 13px; line-height: 1.25;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+          background: #ffffff;
+        }
+        .doc-header { position: fixed; top: 8mm; left: 4mm; right: 4mm; height: 28mm; z-index: 20; }
+        .doc-footer { position: fixed; left: 4mm; right: 4mm; bottom: 4mm; height: 22mm; z-index: 20; font-size: 12px; background: #fff; border-top: 1px solid #ddd; padding-top: 2mm; }
+        .page-container { width: 100%; border-collapse: collapse; border: none; }
+        .page-container > thead > tr > td,
+        .page-container > tbody > tr > td,
+        .page-container > tfoot > tr > td { padding: 0; border: none; }
+        .header-space { height: 40mm; }
+        .footer-space { height: 30mm; }
+        .document-body { padding: 0 4mm; }
+        .logo { position: absolute; top: 0; left: 0; width: 48mm; height: auto; max-height: 14mm; object-fit: contain; }
+        .company-top-address { position: absolute; top: 0; right: 0; width: 78mm; text-align: right; font-size: 13px; line-height: 1.35; }
+        .footer-left { position: absolute; left: 0; bottom: 0; width: 95mm; line-height: 1.45; }
+        .footer-left .company-name { font-weight: 700; letter-spacing: 0.2px; }
+        .footer-left .label { font-weight: 700; }
+        .footer-right { position: absolute; right: 0; bottom: 1mm; width: 60mm; text-align: right; line-height: 1.45; }
+        .website { color: #0000aa; font-weight: 700; text-decoration: none; }
+        .page-number::after { content: "Page " counter(page) " / " counter(pages); color: #777; }
+        .intro-grid { display: grid; grid-template-columns: 1fr 86mm; column-gap: 10mm; min-height: 36mm; margin-bottom: 5mm; }
+        .quote-title { align-self: end; padding-bottom: 1mm; font-family: Arial, Helvetica, sans-serif; font-size: 24px; line-height: 1.2; letter-spacing: 1px; color: #223247; font-weight: 400; }
+        .customer-address { padding-top: 0; font-family: Arial, Helvetica, sans-serif; font-size: 13.5px; font-weight: 400; line-height: 1.28; white-space: pre-line; }
+        .info-row { display: grid; grid-template-columns: repeat(4, 1fr); column-gap: 6mm; margin-bottom: 7mm; width: 100%; }
+        .info-label { color: #9b3a3a; font-weight: 700; font-family: Arial, Helvetica, sans-serif; font-size: 12px; margin-bottom: 2px; }
+        .info-value { font-size: 12.5px; line-height: 1.4; white-space: pre-line; }
+        .quote-table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1px solid #0f2b5b; font-family: Arial, Helvetica, sans-serif; font-size: 12px; }
+        .quote-table thead { display: table-header-group; }
+        .quote-table th { border: 1px solid #0f2b5b; padding: 6px 8px; text-align: left; font-weight: 700; color: #fff; background: #0f2b5b; }
+        .quote-table td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
+        .quote-table .description-col { width: 58%; }
+        .quote-table .qty-col { width: 14%; }
+        .quote-table .unit-col { width: 14%; white-space: normal; overflow-wrap: break-word; word-wrap: break-word; word-break: break-word; }
+        .quote-table .amount-col { width: 14%; white-space: normal; overflow-wrap: break-word; word-wrap: break-word; word-break: break-word; }
+        .text-right { text-align: right; white-space: nowrap; }
+        .text-center { text-align: center; }
+        .product-main-row { background: #fff; }
+        .product-title { font-weight: 700; font-size: 13px; color: #000; margin-bottom: 4px; }
+        .product-description, .product-notes { white-space: pre-line; font-size: 12px; color: #333; margin-top: 4px; line-height: 1.45; overflow-wrap: break-word; word-wrap: break-word; }
+        .section-row td { font-weight: 700; background: #f2f2f2; border: 1px solid #ddd; }
+        .line-block { break-inside: avoid; page-break-inside: avoid; margin-bottom: 6mm; }
+        .totals-table { width: 100%; border-collapse: collapse; border: 1px solid #0f2b5b; }
+        .totals-table td { padding: 8px 12px; border: 1px solid #0f2b5b; }
+        .totals-table .total-label { font-weight: 600; color: #223247; }
+        .totals-table .value { text-align: right; white-space: nowrap; }
+        .totals-table .grand-total-label, .totals-table .grand-total-value { background: #0f2b5b; color: #fff; font-weight: 700; }
+        .totals-table .grand-total-value { text-align: right; }
+        
+        .summary-section {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 12mm;
+          margin-top: 6mm;
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+        .summary-left { flex: 1; font-size: 12px; line-height: 1.55; }
+        .summary-left .company-name { font-weight: 700; margin-bottom: 4px; }
+        .summary-left .label { font-weight: 700; }
+        .summary-right { width: 42%; }
+        .summary-right .totals-table { width: 100%; }
+
+        /* Signature Row CSS */
+        .remarks-sign-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 8mm;
+          margin-top: 7mm;
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+        .remarks-col { flex: 1; font-family: Arial, Helvetica, sans-serif; font-size: 12px; line-height: 1.45; white-space: normal; }
+        .remarks-col .remarks-label { font-weight: 700; margin-bottom: 3px; }
+        .remarks-col p { margin: 0 0 3px 0; }
+        .sign-col { width: 55mm; flex-shrink: 0; font-family: Arial, Helvetica, sans-serif; font-size: 11px; text-align: center; }
+        .sign-box { border: none; margin-top: 90px; }
+        .sign-box-header { padding: 3px 6px; border: none; text-align: left; font-size: 11px; font-weight: 600; }
+        .sign-box-body { height: 39mm; background: transparent; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .sign-box-body img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .sign-box-footer { border: none; padding: 4px 6px 2px; }
+        .sign-name { font-weight: 700; font-size: 11px; }
+        .sign-title { font-size: 10px; color: #444; }
+
+        @media print { .line-block { break-inside: avoid; page-break-inside: avoid; } }
+      </style>
+    </head>
+    <body>
+      ${renderDocumentHeader(logoSrc, companyAddressLines)}
+      ${renderDocumentFooter()}
+      <table class="page-container">
+        <thead><tr><td><div class="header-space"></div></td></tr></thead>
+        <tbody>
+          <tr><td>
+            <main class="document-body">
+              <section class="intro-grid">
+                <div class="quote-title">Invoice ${escapeHtml(document.name)}</div>
+                <div class="customer-address">
+                  ${partnerAddressLines.map((line) => escapeHtml(line)).join("\n")}
+                </div>
+              </section>
+
+              <section class="info-row">
+                <div>
+                  <div class="info-label">Invoice Date</div>
+                  <div class="info-value">${escapeHtml(formatDate(document.invoice_date))}</div>
+                </div>
+                <div>
+                  <div class="info-label">Due Date</div>
+                  <div class="info-value">${escapeHtml(formatDate(document.invoice_date_due))}</div>
+                </div>
+                <div>
+                  <div class="info-label">Source</div>
+                  <div class="info-value">${escapeHtml(document.invoice_origin || "—")}</div>
+                </div>
+                <div>
+                  <div class="info-label">PO Reference</div>
+                  <div class="info-value">${escapeHtml(document.ref || "—")}</div>
+                </div>
+              </section>
+
+              <div class="quote-lines-container">
+                ${(() => {
+                  const hasDiscount = groupedLines.some((g) => g.type === "product" && g.line && g.line.discount);
+                  const hasTaxes = groupedLines.some((g) => g.type === "product" && g.line && g.line.tax_names && g.line.tax_names.length > 0);
+                  return `
+                <table class="quote-table">
+                  <thead>
+                    <tr>
+                      <th class="description-col">Description</th>
+                      <th class="qty-col text-center">Quantity</th>
+                      <th class="unit-col text-right">Unit Price</th>
+                      ${hasDiscount ? `<th class="unit-col text-right">Disc</th>` : ""}
+                      ${hasTaxes ? `<th class="unit-col text-right">Taxes</th>` : ""}
+                      <th class="amount-col text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  ${groupedLines.map((group, index) => renderInvoiceLineGroup(group, index + 1, document.currency_id, hasDiscount, hasTaxes)).join("")}
+                </table>`;
+                })()}
+              </div>
+
+              <section class="summary-section">
+                <div class="summary-left">
+                  <div class="company-name">PT PCBA Semiconductor International</div>
+                  <div><span class="label">NPWP:</span> 053077610321500</div>
+                  <div><span class="label">Bank:</span> OCBC</div>
+                  <div><span class="label">Account:</span> 090800031321</div>
+                  <div><span class="label">Swift Code:</span> NISPIDJA</div>
+                </div>
+
+                <div class="summary-right">
+                  <table class="totals-table">
+                    <tr>
+                      <td class="label">Untaxed Amount</td>
+                      <td class="value">${formatCurrency(document.amount_untaxed, document.currency_id)}</td>
+                    </tr>
+                    <tr>
+                      <td class="label">Taxes</td>
+                      <td class="value">${formatCurrency(document.amount_tax, document.currency_id)}</td>
+                    </tr>
+                    <tr>
+                      <td class="grand-total-label">Total</td>
+                      <td class="grand-total-value">${formatCurrency(document.amount_total, document.currency_id)}</td>
+                    </tr>
+                  </table>
+                </div>
+              </section>
+
+              ${renderRemarksWithSignature(document.narration, signerImageSrc)}
+
+            </main>
+          </td></tr>
+        </tbody>
+        <tfoot><tr><td><div class="footer-space"></div></td></tr></tfoot>
+      </table>
+    </body>
+  </html>`;
+}
+
+// ---------------------------------------------------------------------------
+// renderQuoteWithSignatureHtml
+// ---------------------------------------------------------------------------
+// Copy of renderQuoteHtml with one structural change: instead of rendering
+// the "terms" (Remarks / order.note) as a standalone section at the very end,
+// we render a flex row that contains:
+//   Left  – Remarks text  (flex: 1)
+//   Right – Signature box (fixed ~55 mm wide)
+//
+// The whole row carries `break-inside: avoid` so Chromium / the PDF engine
+// will always keep the two halves on the same page.
+// ---------------------------------------------------------------------------
+function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, signerImageSrc?: string): string {
+  const { document, partner, company, groupedLines } = data;
+  const order = document as OdooSaleOrder;
+
+  const quotationLabel = isSale ? "Sale Order #" : "Quotation #";
+
+  const companyName = company?.name || "PT PCBA Semiconductor International";
+  const logoSrc = company?.logo ? `data:image/png;base64,${company.logo}` : "/assets/psi-logo.png";
+  const companyAddressLines = [companyName, company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia`];
+  const partnerAddressLines = getPartnerAddressLines(partner);
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(document.name)}</title>
+
+  <style>
+    @page {
+      size: A4;
+      margin: 0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      color: #222;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 13px;
+      line-height: 1.25;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      background: #ffffff;
+    }
+
+    /* --- FIXED HEADERS AND FOOTERS --- */
+    .doc-header {
+      position: fixed;
+      top: 8mm;
+      left: 4mm;
+      right: 4mm;
+      height: 28mm;
+      z-index: 20;
+    }
+
+    .doc-footer {
+      position: fixed;
+      left: 4mm;
+      right: 4mm;
+      bottom: 4mm;
+      height: 22mm;
+      z-index: 20;
+      font-size: 12px;
+      background: #fff;
+      border-top: 1px solid #ddd;
+      padding-top: 2mm;
+    }
+
+    /* --- TABLE STRUCTURAL SPACERS */
+    .page-container {
+      width: 100%;
+      border-collapse: collapse;
+      border: none;
+    }
+
+    .page-container > thead > tr > td,
+    .page-container > tbody > tr > td,
+    .page-container > tfoot > tr > td {
+      padding: 0;
+      border: none;
+    }
+
+    .header-space {
+      height: 40mm; /* 8mm top + 28mm height + 4mm breathing room */
+    }
+
+    .footer-space {
+      height: 30mm; /* 4mm bottom + 22mm height + 4mm breathing room */
+    }
+
+    .document-body {
+      padding: 0 4mm; /* Top/Bottom padding removed; handled by spacers */
+    }
+
+    /* --- REMAINING STYLES --- */
+    .logo {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 48mm;
+      height: auto;
+      max-height: 14mm;
+      object-fit: contain;
+    }
+
+    .company-top-address {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 78mm;
+      text-align: right;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .footer-left {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 95mm;
+      line-height: 1.45;
+    }
+
+    .footer-left .company-name {
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+
+    .footer-left .label {
+      font-weight: 700;
+    }
+
+    .footer-right {
+      position: absolute;
+      right: 0;
+      bottom: 1mm;
+      width: 60mm;
+      text-align: right;
+      line-height: 1.45;
+    }
+
+    .website {
+      color: #0000aa;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .page-number::after {
+      content: "Page " counter(page) " / " counter(pages);
+      color: #777;
+    }
+
+    .intro-grid {
+      display: grid;
+      grid-template-columns: 1fr 86mm;
+      column-gap: 10mm;
+      min-height: 36mm;
+      margin-bottom: 5mm;
+    }
+
+    .quote-title {
+      align-self: end;
+      padding-bottom: 1mm;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 24px;
+      line-height: 1.2;
+      letter-spacing: 1px;
+      color: #223247;
+      font-weight: 400;
+    }
+
+    .customer-address {
+      padding-top: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 13.5px;
+      font-weight: 400;
+      line-height: 1.28;
+      white-space: pre-line;
+    }
+
+    .info-row { display: grid; grid-template-columns: repeat(4, 1fr); column-gap: 6mm; margin-bottom: 7mm; width: 100%; }
+
+    .info-label {
+      color: #9b3a3a;
+      font-weight: 700;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
+      margin-bottom: 2px;
+    }
+
+    .info-value {
+      font-size: 12.5px;
+      line-height: 1.4;
+      white-space: pre-line;
+    }
+
+    .quote-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      border: 1px solid #0f2b5b;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
+    }
+
+    .quote-table thead {
+      display: table-header-group;
+    }
+
+    .quote-table th {
+      border: 1px solid #0f2b5b;
+      padding: 6px 8px;
+      text-align: left;
+      font-weight: 700;
+      color: #fff;
+      background: #0f2b5b;
+    }
+
+    .quote-table td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      vertical-align: top;
+    }
+
+    .quote-table .description-col { width: 58%; }
+    .quote-table .qty-col { width: 14%; }
+    .quote-table .unit-col {
+      width: 14%;
+      white-space: normal;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+      word-break: break-word;
+    }
+    .quote-table .amount-col {
+      width: 14%;
+      white-space: normal;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+      word-break: break-word;
+    }
+
+    .text-right { text-align: right; white-space: nowrap; }
+    .text-center { text-align: center; }
+
+    .product-main-row { background: #fff; }
+
+    .product-title {
+      font-weight: 700;
+      font-size: 13px;
+      color: #000;
+      margin-bottom: 4px;
+    }
+
+    .product-description, .product-notes {
+      white-space: pre-line;
+      font-size: 12px;
+      color: #333;
+      margin-top: 4px;
+      line-height: 1.45;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+    }
+
+    .section-row td {
+      font-weight: 700;
+      background: #f2f2f2;
+      border: 1px solid #ddd;
+    }
+
+    .line-block {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .totals-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid #000000;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
+    }
+
+    .totals-table td {
+      padding: 8px 12px;
+      border: 1px solid #000000;
+    }
+
+    .totals-table .total-label {
+      font-weight: 600;
+      color: #223247;
+    }
+
+    .totals-table .value {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .totals-table .grand-total-label {
+      background: #0f2b5b;
+      color: #fff;
+      font-weight: 700;
+      border-top: 1px solid #ffffff;
+      border-bottom: 1px solid #ffffff;
+      border-left: 1px solid #000000;
+      border-right: 1px solid #ffffff;
+    }
+
+    .totals-table .grand-total-value {
+      background: #0f2b5b;
+      color: #fff;
+      font-weight: 700;
+      text-align: right;
+      border-top: 1px solid #ffffff;
+      border-bottom: 1px solid #ffffff;
+      border-left: 1px solid #ffffff;
+      border-right: 1px solid #000000;
+    }
+
+    .totals-table tr:last-child .grand-total-label {
+      border-top: 1px solid #ffffff;
+      border-bottom: 1px solid #000000;
+      border-left: 1px solid #000000;
+      border-right: 1px solid #ffffff;
+    }
+
+    .totals-table tr:last-child .grand-total-value {
+      border-top: 1px solid #ffffff;
+      border-bottom: 1px solid #000000;
+      border-left: 1px solid #ffffff;
+      border-right: 1px solid #000000;
+    }
+
+    /* -----------------------------------------------------------------------
+     * REMARKS + SIGNATURE FOOTER ROW
+     *
+     * The outer wrapper (.remarks-sign-row) has break-inside: avoid so the
+     * entire block — remarks text on the left, signature box on the right —
+     * is always kept on the same page.  If neither column fits on the current
+     * page the whole row pushes to the next page.
+     * --------------------------------------------------------------------- */
+    .remarks-sign-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8mm;
+      margin-top: 7mm;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .remarks-col {
+      flex: 1;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: normal;
+    }
+
+    .remarks-col .remarks-label {
+      font-weight: 700;
+      margin-bottom: 3px;
+    }
+
+    .remarks-col p {
+      margin: 0 0 3px 0;
+    }
+
+    /* Signature block — borderless, clean layout */
+    .sign-col {
+      width: 55mm;
+      flex-shrink: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .sign-box {
+      border: none;
+      margin-top: 90px;
+    }
+
+    .sign-box-header {
+      padding: 3px 6px;
+      border: none;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    /* The stamp/sign image fills this area; height matches the image size */
+    .sign-box-body {
+      height: 39mm;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .sign-box-body img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .sign-box-footer {
+      border: none;
+      padding: 4px 6px 2px;
+    }
+
+    .sign-name {
+      font-weight: 700;
+      font-size: 11px;
+    }
+
+    .sign-title {
+      font-size: 10px;
+      color: #444;
+    }
+
+    @media print {
+      .line-block {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header class="doc-header">
+    <img class="logo" src="${logoSrc}" />
+    <div class="company-top-address">
+      ${companyAddressLines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}
+    </div>
+  </header>
+
+  <footer class="doc-footer">
+    <div class="footer-left">
+      ${
+        /*
+      <div class="company-name">PT PCBA Semiconductor International</div>
+      <div><span class="label">NPWP:</span> 053077610321500</div>
+      <div><span class="label">Bank:</span> OCBC</div>
+      <div><span class="label">Account:</span> 090800031321</div>
+      <div><span class="label">Swift Code:</span> NISPIDJA</div>
+      */ ""
+      }
+    </div>
+
+    <div class="footer-right">
+      <div><a class="website">www.psiglobaltech.com</a></div>
+      <div class="page-number"></div>
+    </div>
+  </footer>
+
+  <table class="page-container">
+    <thead>
+      <tr>
+        <td>
+          <div class="header-space"></div>
+        </td>
+      </tr>
+    </thead>
+
+    <tbody>
+      <tr>
+        <td>
+          <main class="document-body">
+            <section class="intro-grid">
+              <div class="quote-title">
+                ${escapeHtml(quotationLabel)} ${escapeHtml(document.name)}
+              </div>
+              <div class="customer-address">
+                ${partnerAddressLines.map((line) => escapeHtml(line)).join("\n")}
+              </div>
+            </section>
+
+            <section class="info-row">
+              <div>
+                <div class="info-label">Quotation Date</div>
+                <div class="info-value">${escapeHtml(formatDate(order.date_order))}</div>
+              </div>
+              <div>
+                <div class="info-label">Expiration</div>
+                <div class="info-value">${escapeHtml(formatDate(order.validity_date))}</div>
+              </div>
+              <div>
+                <div class="info-label">Salesperson</div>
+                <div class="info-value">${escapeHtml(m2oName(order.user_id))}</div>
+              </div>
+              <div>
+                <div class="info-label">Incoterm</div>
+                <div class="info-value">${escapeHtml(m2oName(order.incoterm) || "—")}</div>
+              </div>
+            </section>
+
+            <div class="quote-lines-container">
+              ${(() => {
+                const hasDiscount = groupedLines.some((g) => g.type === "product" && g.line && g.line.discount);
+                const hasTaxes = groupedLines.some((g) => g.type === "product" && g.line && g.line.tax_names && g.line.tax_names.length > 0);
+                return `
+              <table class="quote-table">
+                <thead>
+                  <tr>
+                    <th class="description-col">Description</th>
+                    <th class="qty-col text-center">Quantity</th>
+                    <th class="unit-col text-right">Unit Price</th>
+                    ${hasDiscount ? `<th class="unit-col text-right">Disc</th>` : ""}
+                    ${hasTaxes ? `<th class="unit-col text-right">Taxes</th>` : ""}
+                    <th class="amount-col text-right">Amount</th>
+                  </tr>
+                </thead>
+                ${groupedLines.map((group, index) => renderLineGroup(group, index + 1, document.currency_id, hasDiscount, hasTaxes)).join("")}
+              </table>`;
+              })()}
+            </div>
+
+
+            <table style="width: 100%; border: none; border-collapse: collapse; margin-top: 6mm; page-break-inside: avoid;">
+              <tr>
+                <td style="width: 58%; border: none; padding: 0;"></td>
+                <td style="width: 42%; border: none; padding: 0; vertical-align: top;">
+                  <table class="totals-table">
+                    <tr>
+                      <td class="label">Untaxed Amount</td>
+                      <td class="value">${formatCurrency(document.amount_untaxed, document.currency_id)}</td>
+                    </tr>
+
+                    <tr>
+                      <td class="label">Taxes</td>
+                      <td class="value">${formatCurrency(document.amount_tax, document.currency_id)}</td>
+                    </tr>
+
+                  ${(() => {
+                    const airLine = groupedLines.find((g) => g.type === "product" && "line" in g && /\bshipping\b.*\bair\b|\bair\b.*\bshipping\b/i.test((g as any).line?.name || ""));
+                    const seaLine = groupedLines.find((g) => g.type === "product" && "line" in g && /\bshipping\b.*\bsea\b|\bsea\b.*\bshipping\b/i.test((g as any).line?.name || ""));
+
+                    if (!airLine && !seaLine) {
+                      return `<tr>
+                        <td class="grand-total-label">Total</td>
+                        <td class="grand-total-value">
+                          ${formatCurrency(document.amount_total, document.currency_id)}
+                        </td>
+                      </tr>`;
+                    }
+
+                    const airPrice = airLine && airLine.type === "product" ? airLine.line.price_total || 0 : 0;
+                    const seaPrice = seaLine && seaLine.type === "product" ? seaLine.line.price_total || 0 : 0;
+                    const baseTotal = document.amount_total - airPrice - seaPrice;
+
+                    let html = "";
+
+                    if (airLine) {
+                      html += `<tr>
+                        <td class="grand-total-label">Total by Air</td>
+                        <td class="grand-total-value">
+                          ${formatCurrency(baseTotal + airPrice, document.currency_id)}
+                        </td>
+                      </tr>`;
+                    }
+
+                    if (seaLine) {
+                      html += `<tr>
+                        <td class="grand-total-label">Total by Sea</td>
+                        <td class="grand-total-value">
+                          ${formatCurrency(baseTotal + seaPrice, document.currency_id)}
+                        </td>
+                      </tr>`;
+                    }
+
+                    return html;
+                  })()}
+                  </table>
+                </td>
+              </tr>
+            </table>
+
+            ${renderRemarksWithSignature(order.note, signerImageSrc)}
+          </main>
+        </td>
+      </tr>
+    </tbody>
+
+    <tfoot>
+      <tr>
+        <td>
+          <div class="footer-space"></div>
+        </td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+}
+
+/**
+ * Renders the Remarks + Signature block as a single flex row.
+ *
+ * - **Left column** (`.remarks-col`) – Remarks heading + sanitized Odoo HTML note.
+ * - **Right column** (`.sign-col`) – Borderless signature block:
+ *     - "Sender," header
+ *     - Stamp/signature image area: renders `<img>` when `signerImageSrc` is
+ *       supplied; the area is invisible (height 0) when omitted so nothing
+ *       shows on the page.
+ *     - Static signer name "Gusfan" and "Authorized Sign" title.
+ *
+ * The entire row carries `break-inside: avoid` so Remarks and the signature
+ * are always printed on the same page.
+ *
+ * @param note           - Remarks HTML from Odoo (may be undefined/empty).
+ * @param signerImageSrc - Base64 data-URI or URL of the stamp/signature image,
+ *   e.g. `"data:image/png;base64,<base64string>"`.  Pass `undefined` to leave
+ *   the image area empty.
+ */
+function renderRemarksWithSignature(note?: string, signerImageSrc?: string): string {
+  const hasRemarks = note && stripHtml(note).trim();
+
+  // Stamp image element — only rendered when a source is provided.
+  // The surrounding .sign-box-body uses flexbox centering so the image
+  // is centered in the available 25 mm slot.
+  const stampImg = signerImageSrc ? `<img src="${signerImageSrc}" alt="Authorized stamp / signature" />` : "";
+
+  return `
+    <div class="remarks-sign-row">
+      <!-- Left: Remarks -->
+      <div class="remarks-col">
+        ${
+          hasRemarks
+            ? `
+               <div>${sanitizeOdooHtml(note!)}</div>`
+            : ""
+        }
+      </div>
+
+      <!-- Right: Signature block (borderless) -->
+      <div class="sign-col">
+        <div class="sign-box">
+          <div class="sign-box-body">${stampImg}</div>
+          <div class="sign-box-footer">
+            <div class="sign-name">Gusfan</div>
+            <div class="sign-title">Authorized Sign</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 async function renderHtmlToPdf(html: string): Promise<Buffer> {
   const browser = await chromium.launch({
     args: ["--no-sandbox"],

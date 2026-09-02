@@ -7,7 +7,8 @@
     "outDir": "./dist", //setup output for translated ts into js
     "esModuleInterop": true,
     "strict": true
-  }
+  },
+  "exclude": ["node_modules", "client", "dist"]
 }
 
 // {

@@ -384,6 +384,7 @@ function groupProductLinesWithNotes<T extends OdooDocumentLine>(lines: T[]): Doc
   const groupedLines: DocumentLineGroup<T>[] = [];
 
   for (const line of lines) {
+    // ── 1. Section header ──────────────────────────────────────────────────
     if (line.display_type === "line_section") {
       groupedLines.push({
         type: "section",
@@ -392,6 +393,7 @@ function groupProductLinesWithNotes<T extends OdooDocumentLine>(lines: T[]): Doc
       continue;
     }
 
+    // ── 2. Explicit Odoo note line ─────────────────────────────────────────
     if (line.display_type === "line_note") {
       const previousGroup = groupedLines[groupedLines.length - 1];
 
@@ -407,6 +409,35 @@ function groupProductLinesWithNotes<T extends OdooDocumentLine>(lines: T[]): Doc
       continue;
     }
 
+    // ── 3. Description-only lines (display_type: false, no product, zero qty/price) ──
+    //
+    // Odoo sometimes stores italic sub-description lines (e.g. "Part Number: …")
+    // as regular display_type: false lines instead of line_note when the user types
+    // a description-only row directly into the invoice. These must NOT get their own
+    // table row — they should render inside the preceding product row's description
+    // cell (as .product-notes).
+    //
+    // Detection criteria (all must be true):
+    //   • display_type is false  (plain line, not section/note)
+    //   • no product_id attached  (pure text, not a real product)
+    //   • quantity === 0 and price_unit === 0  (no monetary value)
+    const asAny = line as any;
+    const isDescriptionOnly =
+      !asAny.product_id &&
+      (asAny.quantity ?? 0) === 0 &&
+      (asAny.price_unit ?? 0) === 0;
+
+    if (isDescriptionOnly) {
+      const previousGroup = groupedLines[groupedLines.length - 1];
+      if (previousGroup?.type === "product") {
+        (previousGroup as Extract<DocumentLineGroup<T>, { type: "product" }>).notes.push(line);
+      }
+      // If there is no preceding product group, silently skip — a description
+      // line at the very top of the list has no parent to attach to.
+      continue;
+    }
+
+    // ── 4. Normal product / service line ──────────────────────────────────
     groupedLines.push({
       type: "product",
       line,

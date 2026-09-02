@@ -1,7 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { getCachedUid } from "../services/authServices";
+import fs from "fs";
 import { getSaleOrderQuoteData, getInvoiceData, getPurchaseOrder } from "../services/odooServices";
-import { generateInvoicePdf, generatePurchasePdf, generateSaleOrderPdf } from "../services/quotePdfService";
+import { generateInvoicePdf, generatePurchasePdf, generateSaleOrderPdf, generateQuoteWithSignaturePdf, generateInvoiceWithSignaturePdf } from "../services/quotePdfService";
 
 type docTypes = "draft" | "invoice" | "sale" | "purchase-order";
 export async function downloadSaleOrderQuotePdf(req: Request, res: Response, next: NextFunction) {
@@ -38,7 +39,8 @@ export async function downloadSaleOrderQuotePdf(req: Request, res: Response, nex
         return;
       }
     }
-
+    const stampBase64 = fs.readFileSync("./src/assets/sign-psi.png").toString("base64");
+    const signerImageSrc = `data:image/png;base64,${stampBase64}`;
     const documentHandler: Record<docTypes, (uid: number, dataId: number) => Promise<{ pdf: Buffer; filename: string }>> = {
       draft: async (uid, dataId) => {
         const quoteData = await getSaleOrderQuoteData(uid, dataId);
@@ -50,7 +52,8 @@ export async function downloadSaleOrderQuotePdf(req: Request, res: Response, nex
           lines: quoteData.lines,
           groupedLines: quoteData.groupedLines,
         };
-        const pdf = await generateSaleOrderPdf(pdfData, isSale);
+        // const pdf = await generateSaleOrderPdf(pdfData, isSale);
+        const pdf = await generateQuoteWithSignaturePdf(pdfData, false, signerImageSrc);
         const filename = `Quotation-${safeFilename(quoteData.document.name)}.pdf`;
 
         return { pdf, filename };
@@ -65,7 +68,8 @@ export async function downloadSaleOrderQuotePdf(req: Request, res: Response, nex
           lines: quoteData.lines,
           groupedLines: quoteData.groupedLines,
         };
-        const pdf = await generateInvoicePdf(pdfData);
+        // const pdf = await generateInvoicePdf(pdfData);
+        const pdf = await generateInvoiceWithSignaturePdf(pdfData, signerImageSrc);
         const filename = `Invoice-${safeFilename(quoteData.document.name)}.pdf`;
         return { pdf, filename };
       },
