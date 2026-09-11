@@ -29,8 +29,9 @@ export async function generatePurchasePdf(purchaseOrderData: DocumentData<OdooPu
  *   left empty (transparent) so the space is reserved but invisible.
  */
 export async function generateQuoteWithSignaturePdf(quoteData: SaleOrderData, isSale: boolean, signerImageSrc?: string): Promise<Buffer> {
+  const header = handleHeader(quoteData);
   const html = renderQuoteWithSignatureHtml(quoteData, isSale, signerImageSrc);
-  return renderHtmlToPdf(html);
+  return renderHtmlToPdf(html, header);
 }
 
 /**
@@ -258,6 +259,22 @@ function renderInvoiceWithSignatureHtml(data: DocumentData<OdooInvoice, OdooInvo
 // The whole row carries `break-inside: avoid` so Chromium / the PDF engine
 // will always keep the two halves on the same page.
 // ---------------------------------------------------------------------------
+function handleHeader(data: SaleOrderData): string {
+  const { document, partner, company, groupedLines } = data;
+  const companyName = company?.name || "PT PCBA Semiconductor International";
+  const logoSrc = company?.logo ? `data:image/png;base64,${company.logo}` : "/assets/psi-logo.png";
+  const companyAddressLines = [companyName, company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia`];
+
+  return `
+  <div style="position: relative; width: 100%; height: 28mm; margin-top: 8mm; padding: 0 4mm; font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; box-sizing: border-box;">
+    <img src="${logoSrc}" style="position: absolute; top: 0; left: 4mm; width: 48mm; height: auto; max-height: 14mm; object-fit: contain;" />
+    <div style="position: absolute; top: 0; right: 4mm; width: 78mm; text-align: right; line-height: 1.35;">
+      ${companyAddressLines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}
+    </div>
+  </div>
+`;
+}
+
 function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, signerImageSrc?: string): string {
   const { document, partner, company, groupedLines } = data;
   const order = document as OdooSaleOrder;
@@ -278,7 +295,6 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
   <style>
     @page {
       size: A4;
-      margin: 0;
     }
 
     * {
@@ -477,6 +493,16 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
       vertical-align: top;
     }
 
+     .quote-table tr {
+      break-inside: auto;
+      page-break-inside: auto;
+    }
+
+    .page-container > tbody > tr > td {
+      break-inside: auto;
+      page-break-inside: auto;
+    }
+
     .quote-table .description-col { width: 58%; }
     .quote-table .qty-col { width: 14%; }
     .quote-table .unit-col {
@@ -523,8 +549,8 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
     }
 
     .line-block {
-      break-inside: avoid;
-      page-break-inside: avoid;
+      break-inside: auto;
+      page-break-inside: auto;
     }
 
     .totals-table {
@@ -682,7 +708,8 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
 </head>
 
 <body>
-  <header class="doc-header">
+  ${
+    /*<header class="doc-header">
     <img class="logo" src="${logoSrc}" />
     <div class="company-top-address">
       ${companyAddressLines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}
@@ -698,8 +725,8 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
       <div><span class="label">Bank:</span> OCBC</div>
       <div><span class="label">Account:</span> 090800031321</div>
       <div><span class="label">Swift Code:</span> NISPIDJA</div>
-      */ ""
-      }
+       ""
+      
     </div>
 
     <div class="footer-right">
@@ -707,8 +734,12 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
       <div class="page-number"></div>
     </div>
   </footer>
+  */ ""
+  }
 
   <table class="page-container">
+     ${
+       /*
     <thead>
       <tr>
         <td>
@@ -716,6 +747,8 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
         </td>
       </tr>
     </thead>
+    */ ""
+     }
 
     <tbody>
       <tr>
@@ -836,6 +869,8 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
       </tr>
     </tbody>
 
+    ${
+      /*
     <tfoot>
       <tr>
         <td>
@@ -843,6 +878,8 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
         </td>
       </tr>
     </tfoot>
+    */ ""
+    }
   </table>
 </body>
 </html>`;
@@ -901,7 +938,7 @@ function renderRemarksWithSignature(note?: string, signerImageSrc?: string): str
   `;
 }
 
-async function renderHtmlToPdf(html: string): Promise<Buffer> {
+async function renderHtmlToPdf(html: string, headerTemplate?: string): Promise<Buffer> {
   const browser = await chromium.launch({
     args: ["--no-sandbox"],
   });
@@ -913,11 +950,33 @@ async function renderHtmlToPdf(html: string): Promise<Buffer> {
       waitUntil: "networkidle",
     });
 
+    const footerTemplate = `
+      <div style="position: relative; width: calc(100% - 8mm); height: 22mm; margin: 0 4mm 4mm 4mm; padding-top: 2mm; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #222; border-top: 1px solid #ddd; box-sizing: border-box;">
+        
+        <!-- Left side content (Left empty to match your commented-out block) -->
+        <div style="position: absolute; left: 0; bottom: 0; width: 95mm; line-height: 1.45;"></div>
+        
+        <div style="position: absolute; right: 0; bottom: 1mm; width: 60mm; text-align: right; line-height: 1.45;">
+          <div style="color: #0000aa; font-weight: 700;">www.psiglobaltech.com</div>
+          <div style="color: #777;">Page <span class="pageNumber"></span> / <span class="totalPages"></span></div>
+        </div>
+        
+      </div>
+    `;
+
     const pdf = await page.pdf({
       format: "A4",
       printBackground: true,
       preferCSSPageSize: true,
-      displayHeaderFooter: false,
+      displayHeaderFooter: true,
+      headerTemplate: headerTemplate,
+      footerTemplate: footerTemplate,
+      margin: {
+        top: "40mm", // 8mm top margin + 28mm header height
+        bottom: "30mm", // 4mm bottom margin + 22mm footer height
+        left: "0", // Keep 0 because your template handles the 4mm padding internally
+        right: "0",
+      },
     });
 
     return Buffer.from(pdf);
@@ -2017,26 +2076,74 @@ function renderLineGroup(group: DocumentLineGroup<OdooSaleOrderLine>, displayNum
   const nameParts = line.name.split("\n");
   const title = nameParts[0];
   const description = nameParts.length > 1 ? nameParts.slice(1).join("\n") : "";
-
-  // Combine any additional Odoo notes for this line
   const extraNotes = group.notes.length > 0 ? group.notes.map((n) => formatNoteText(n.name)).join("\n\n") : "";
 
-  return `
-      <tbody class="line-block">
-        <tr class="product-main-row">
-          <td class="description-cell">
-            <div class="product-title">${escapeHtml(title)}</div>
-            ${description ? `<div class="product-description">${formatNoteText(description)}</div>` : ""}
-            ${extraNotes ? `<div class="product-notes">${extraNotes}</div>` : ""}
-          </td>
-          <td class="qty-col text-center">${formatQty(line.product_uom_qty)} ${escapeHtml(unitName)}</td>
-          <td class="unit-col text-right">${formatCurrency(line.price_unit, currency)}</td>
-          ${hasDiscount ? `<td class="unit-col text-right">${line.discount ? escapeHtml(line.discount + "%") : "-"}</td>` : ""}
-          ${hasTaxes ? `<td class="unit-col text-right">${line.tax_names && line.tax_names.length > 0 ? escapeHtml(line.tax_names.join(", ")) : "-"}</td>` : ""}
-          <td class="amount-col text-right">${formatCurrency(line.price_subtotal, currency)}</td>
-        </tr>
-      </tbody>
-  `;
+  // Combine full text to evaluate character count
+  const fullText = description + (extraNotes ? "\n\n" + extraNotes : "");
+  const charCount = fullText.length;
+
+  // Remove the 'line-block' (page-break avoid) if we are actively splitting rows
+  const tbodyClass = charCount >= 1000 ? "" : "line-block";
+
+  let html = `<tbody class="${tbodyClass}">`;
+
+  if (charCount >= 1000) {
+    // 1. SPLIT MODE: Render the main product title and pricing row first
+    html += `
+      <tr class="product-main-row">
+        <td class="description-cell" style="border-bottom: none;">
+          <div class="product-title">${escapeHtml(title)}</div>
+        </td>
+        <td class="qty-col text-center" style="border-bottom: none;">${formatQty(line.product_uom_qty)} ${escapeHtml(unitName)}</td>
+        <td class="unit-col text-right" style="border-bottom: none;">${formatCurrency(line.price_unit, currency)}</td>
+        ${hasDiscount ? `<td class="unit-col text-right" style="border-bottom: none;">${line.discount ? escapeHtml(line.discount + "%") : "-"}</td>` : ""}
+        ${hasTaxes ? `<td class="unit-col text-right" style="border-bottom: none;">${line.tax_names && line.tax_names.length > 0 ? escapeHtml(line.tax_names.join(", ")) : "-"}</td>` : ""}
+        <td class="amount-col text-right" style="border-bottom: none;">${formatCurrency(line.price_subtotal, currency)}</td>
+      </tr>
+    `;
+
+    // 2. SPLIT MODE: Iterate through description lines and render each in its own row
+    const descLines = fullText.split("\n");
+    descLines.forEach((dLine, index) => {
+      const isLast = index === descLines.length - 1;
+      // Keep middle borders hidden, restore the bottom border on the final line
+      const borderStyle = isLast ? "border-top: none;" : "border-top: none; border-bottom: none;";
+
+      if (dLine.trim() !== "") {
+        html += `
+          <tr style="break-inside: auto; page-break-inside: auto;">
+            <td class="description-cell" style="${borderStyle} padding-top: 2px; padding-bottom: 2px;">
+              <div class="product-description" style="margin: 0; white-space: pre-line; ">${formatNoteText(dLine)}</div>
+            </td>
+            <td style="${borderStyle}"></td>
+            <td style="${borderStyle}"></td>
+            ${hasDiscount ? `<td style="${borderStyle}"></td>` : ""}
+            ${hasTaxes ? `<td style="${borderStyle}"></td>` : ""}
+            <td style="${borderStyle}"></td>
+          </tr>
+        `;
+      }
+    });
+  } else {
+    // STANDARD MODE: Single-row render for short descriptions
+    html += `
+      <tr class="product-main-row">
+        <td class="description-cell">
+          <div class="product-title">${escapeHtml(title)}</div>
+          ${description ? `<div class="product-description">${formatNoteText(description)}</div>` : ""}
+          ${extraNotes ? `<div class="product-notes">${extraNotes}</div>` : ""}
+        </td>
+        <td class="qty-col text-center">${formatQty(line.product_uom_qty)} ${escapeHtml(unitName)}</td>
+        <td class="unit-col text-right">${formatCurrency(line.price_unit, currency)}</td>
+        ${hasDiscount ? `<td class="unit-col text-right">${line.discount ? escapeHtml(line.discount + "%") : "-"}</td>` : ""}
+        ${hasTaxes ? `<td class="unit-col text-right">${line.tax_names && line.tax_names.length > 0 ? escapeHtml(line.tax_names.join(", ")) : "-"}</td>` : ""}
+        <td class="amount-col text-right">${formatCurrency(line.price_subtotal, currency)}</td>
+      </tr>
+    `;
+  }
+
+  html += `</tbody>`;
+  return html;
 }
 
 function renderPurchaseOrderLineGroup(group: DocumentLineGroup<OdooPurchaseOrderLine>, displayNumber: number, currency: OdooMany2One, hasDiscount: boolean, hasTaxes: boolean): string {
