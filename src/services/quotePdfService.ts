@@ -1,19 +1,24 @@
+import fs from "fs";
+import path from "path";
 import { chromium } from "playwright";
 import { DocumentData, DocumentLineGroup, OdooSaleOrder, OdooSaleOrderLine, OdooInvoice, OdooInvoiceLine, OdooMany2One, OdooPartner, OdooCompany, OdooPurchaseOrder, OdooPurchaseOrderLine, SaleOrderData } from "../types/document.type";
 
 export async function generateSaleOrderPdf(quoteData: SaleOrderData, isSale: boolean): Promise<Buffer> {
+  const header = handleHeader(quoteData.company);
   const html = renderQuoteHtml(quoteData, isSale);
-  return renderHtmlToPdf(html);
+  return renderHtmlToPdf(html, header);
 }
 
 export async function generateInvoicePdf(invoiceData: DocumentData<OdooInvoice, OdooInvoiceLine>): Promise<Buffer> {
+  const header = handleHeader(invoiceData.company);
   const html = renderInvoiceHtml(invoiceData);
-  return renderHtmlToPdf(html);
+  return renderHtmlToPdf(html, header);
 }
 
 export async function generatePurchasePdf(purchaseOrderData: DocumentData<OdooPurchaseOrder, OdooPurchaseOrderLine>): Promise<Buffer> {
+  const header = handleHeader(purchaseOrderData.company);
   const html = renderPurchaseOrderHtml(purchaseOrderData);
-  return renderHtmlToPdf(html);
+  return renderHtmlToPdf(html, header);
 }
 
 /**
@@ -29,7 +34,7 @@ export async function generatePurchasePdf(purchaseOrderData: DocumentData<OdooPu
  *   left empty (transparent) so the space is reserved but invisible.
  */
 export async function generateQuoteWithSignaturePdf(quoteData: SaleOrderData, isSale: boolean, signerImageSrc?: string): Promise<Buffer> {
-  const header = handleHeader(quoteData);
+  const header = handleHeader(quoteData.company);
   const html = renderQuoteWithSignatureHtml(quoteData, isSale, signerImageSrc);
   return renderHtmlToPdf(html, header);
 }
@@ -42,16 +47,13 @@ export async function generateQuoteWithSignaturePdf(quoteData: SaleOrderData, is
  *   image. When omitted, the space is reserved but left empty.
  */
 export async function generateInvoiceWithSignaturePdf(invoiceData: DocumentData<OdooInvoice, OdooInvoiceLine>, signerImageSrc?: string): Promise<Buffer> {
+  const header = handleHeader(invoiceData.company);
   const html = renderInvoiceWithSignatureHtml(invoiceData, signerImageSrc);
-  return renderHtmlToPdf(html);
+  return renderHtmlToPdf(html, header);
 }
 
 function renderInvoiceWithSignatureHtml(data: DocumentData<OdooInvoice, OdooInvoiceLine>, signerImageSrc?: string): string {
-  const { document, partner, company, groupedLines } = data;
-
-  const companyName = company?.name || "PT PCBA Semiconductor International";
-  const logoSrc = company?.logo ? `data:image/png;base64,${company.logo}` : "/assets/psi-logo.png";
-  const companyAddressLines = [companyName, company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia`];
+  const { document, partner, groupedLines } = data;
   const partnerAddressLines = getPartnerAddressLines(partner);
 
   return `<!doctype html>
@@ -60,7 +62,7 @@ function renderInvoiceWithSignatureHtml(data: DocumentData<OdooInvoice, OdooInvo
       <meta charset="utf-8" />
       <title>${escapeHtml(document.name)}</title>
       <style>
-        @page { size: A4; margin: 0; }
+        @page { size: A4; }
         * { box-sizing: border-box; }
         html, body {
           margin: 0; padding: 0; color: #222;
@@ -70,23 +72,11 @@ function renderInvoiceWithSignatureHtml(data: DocumentData<OdooInvoice, OdooInvo
           print-color-adjust: exact;
           background: #ffffff;
         }
-        .doc-header { position: fixed; top: 8mm; left: 4mm; right: 4mm; height: 28mm; z-index: 20; }
-        .doc-footer { position: fixed; left: 4mm; right: 4mm; bottom: 4mm; height: 22mm; z-index: 20; font-size: 12px; background: #fff; border-top: 1px solid #ddd; padding-top: 2mm; }
         .page-container { width: 100%; border-collapse: collapse; border: none; }
         .page-container > thead > tr > td,
         .page-container > tbody > tr > td,
         .page-container > tfoot > tr > td { padding: 0; border: none; }
-        .header-space { height: 40mm; }
-        .footer-space { height: 30mm; }
         .document-body { padding: 0 4mm; }
-        .logo { position: absolute; top: 0; left: 0; width: 48mm; height: auto; max-height: 14mm; object-fit: contain; }
-        .company-top-address { position: absolute; top: 0; right: 0; width: 78mm; text-align: right; font-size: 13px; line-height: 1.35; }
-        .footer-left { position: absolute; left: 0; bottom: 0; width: 95mm; line-height: 1.45; }
-        .footer-left .company-name { font-weight: 700; letter-spacing: 0.2px; }
-        .footer-left .label { font-weight: 700; }
-        .footer-right { position: absolute; right: 0; bottom: 1mm; width: 60mm; text-align: right; line-height: 1.45; }
-        .website { color: #0000aa; font-weight: 700; text-decoration: none; }
-        .page-number::after { content: "Page " counter(page) " / " counter(pages); color: #777; }
         .intro-grid { display: grid; grid-template-columns: 1fr 86mm; column-gap: 10mm; min-height: 36mm; margin-bottom: 5mm; }
         .quote-title { align-self: end; padding-bottom: 1mm; font-family: Arial, Helvetica, sans-serif; font-size: 24px; line-height: 1.2; letter-spacing: 1px; color: #223247; font-weight: 400; }
         .customer-address { padding-top: 0; font-family: Arial, Helvetica, sans-serif; font-size: 13.5px; font-weight: 400; line-height: 1.28; white-space: pre-line; }
@@ -156,10 +146,7 @@ function renderInvoiceWithSignatureHtml(data: DocumentData<OdooInvoice, OdooInvo
       </style>
     </head>
     <body>
-      ${renderDocumentHeader(logoSrc, companyAddressLines)}
-      ${renderDocumentFooter()}
       <table class="page-container">
-        <thead><tr><td><div class="header-space"></div></td></tr></thead>
         <tbody>
           <tr><td>
             <main class="document-body">
@@ -243,49 +230,85 @@ function renderInvoiceWithSignatureHtml(data: DocumentData<OdooInvoice, OdooInvo
             </main>
           </td></tr>
         </tbody>
-        <tfoot><tr><td><div class="footer-space"></div></td></tr></tfoot>
       </table>
     </body>
   </html>`;
 }
 
 // ---------------------------------------------------------------------------
-// renderQuoteWithSignatureHtml
+// Header & Logo Helpers
 // ---------------------------------------------------------------------------
-// Copy of renderQuoteHtml with one structural change: instead of rendering
-// the "terms" (Remarks / order.note) as a standalone section at the very end,
-// we render a flex row that contains:
-//   Left  – Remarks text  (flex: 1)
-//   Right – Signature box (fixed ~55 mm wide)
-//
-// The whole row carries `break-inside: avoid` so Chromium / the PDF engine
-// will always keep the two halves on the same page.
-// ---------------------------------------------------------------------------
-function handleHeader(data: SaleOrderData): string {
-  const { document, partner, company, groupedLines } = data;
+let defaultLogoDataUri: string | null = null;
+
+function getDefaultLogoSrc(): string {
+  if (defaultLogoDataUri !== null) return defaultLogoDataUri;
+  try {
+    const candidatePaths = [path.resolve(__dirname, "../assets/psi-logo.png"), path.resolve(process.cwd(), "src/assets/psi-logo.png"), path.resolve(process.cwd(), "dist/assets/psi-logo.png")];
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        const file = fs.readFileSync(p);
+        defaultLogoDataUri = `data:image/png;base64,${file.toString("base64")}`;
+        return defaultLogoDataUri;
+      }
+    }
+  } catch (err) {
+    console.error("Failed to load default company logo:", err);
+  }
+  defaultLogoDataUri = "";
+  return defaultLogoDataUri;
+}
+
+function getCompanyLogoSrc(company?: OdooCompany | null): string {
+  if (company?.logo) {
+    const logo = String(company.logo).trim();
+    if (logo) {
+      return logo.startsWith("data:") ? logo : `data:image/png;base64,${logo}`;
+    }
+  }
+  return getDefaultLogoSrc();
+}
+
+/**
+ * Builds the Playwright PDF `headerTemplate` string used by `renderHtmlToPdf`.
+ *
+ * All document templates now use Playwright's native `displayHeaderFooter`
+ * mechanism instead of in-body CSS-fixed headers.
+ *
+ * @param companyOrData - An OdooCompany record or any DocumentData containing a `company` field.
+ */
+export function handleHeader(companyOrData?: { company?: OdooCompany | null } | OdooCompany | null): string {
+  const company = companyOrData && "company" in companyOrData ? companyOrData.company : (companyOrData as OdooCompany | null);
+  return buildPlaywrightHeaderTemplate(company ?? null);
+}
+
+function buildPlaywrightHeaderTemplate(company: OdooCompany | null): string {
   const companyName = company?.name || "PT PCBA Semiconductor International";
-  const logoSrc = company?.logo ? `data:image/png;base64,${company.logo}` : "/assets/psi-logo.png";
-  const companyAddressLines = [companyName, company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia`];
+  const logoSrc = getCompanyLogoSrc(company);
+  const companyAddressLines = [company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia`];
+  const branchCompanyAddressLines = ["Ruko Tanamera Waterfront Estates No. A02 Cibatu, Cikarang 17530, Indonesia"];
 
   return `
-  <div style="position: relative; width: 100%; height: 28mm; margin-top: 8mm; padding: 0 4mm; font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; box-sizing: border-box;">
-    <img src="${logoSrc}" style="position: absolute; top: 0; left: 4mm; width: 48mm; height: auto; max-height: 14mm; object-fit: contain;" />
-    <div style="position: absolute; top: 0; right: 4mm; width: 78mm; text-align: right; line-height: 1.35;">
-      ${companyAddressLines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}
+  <div style="position: relative; width: 100%; height: 28mm; padding: 0 4mm; font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; box-sizing: border-box;">
+    ${logoSrc ? `<img src="${logoSrc}" style="position: absolute; top: 0; left: 4mm; width: 48mm; height: auto; max-height: 14mm; object-fit: contain;" />` : ""}
+    <div style="position: absolute; top: 0; right: 4mm; width: 78mm; text-align: left; line-height: 1.35;">
+      <div>${escapeHtml(companyName)}</div>
+      <div>
+        <b>Head Office: </b>${companyAddressLines.map((line) => `${escapeHtml(line)}`).join("<br>")}  
+      </div>
+     
+      <div>
+        <b>Branch: </b>${branchCompanyAddressLines.map((line) => escapeHtml(line)).join("<br>")}
+      </div>
     </div>
   </div>
 `;
 }
 
 function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, signerImageSrc?: string): string {
-  const { document, partner, company, groupedLines } = data;
+  const { document, partner, groupedLines } = data;
   const order = document as OdooSaleOrder;
 
   const quotationLabel = isSale ? "Sale Order #" : "Quotation #";
-
-  const companyName = company?.name || "PT PCBA Semiconductor International";
-  const logoSrc = company?.logo ? `data:image/png;base64,${company.logo}` : "/assets/psi-logo.png";
-  const companyAddressLines = [companyName, company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia`];
   const partnerAddressLines = getPartnerAddressLines(partner);
 
   return `<!doctype html>
@@ -316,30 +339,6 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
       background: #ffffff;
     }
 
-    /* --- FIXED HEADERS AND FOOTERS --- */
-    .doc-header {
-      position: fixed;
-      top: 8mm;
-      left: 4mm;
-      right: 4mm;
-      height: 28mm;
-      z-index: 20;
-    }
-
-    .doc-footer {
-      position: fixed;
-      left: 4mm;
-      right: 4mm;
-      bottom: 4mm;
-      height: 22mm;
-      z-index: 20;
-      font-size: 12px;
-      background: #fff;
-      border-top: 1px solid #ddd;
-      padding-top: 2mm;
-    }
-
-    /* --- TABLE STRUCTURAL SPACERS */
     .page-container {
       width: 100%;
       border-collapse: collapse;
@@ -352,17 +351,8 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
       padding: 0;
       border: none;
     }
-
-    .header-space {
-      height: 40mm; /* 8mm top + 28mm height + 4mm breathing room */
-    }
-
-    .footer-space {
-      height: 30mm; /* 4mm bottom + 22mm height + 4mm breathing room */
-    }
-
     .document-body {
-      padding: 0 4mm; /* Top/Bottom padding removed; handled by spacers */
+      padding: 0 4mm;
     }
 
     /* --- REMAINING STYLES --- */
@@ -711,48 +701,7 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
 </head>
 
 <body>
-  ${
-    /*<header class="doc-header">
-    <img class="logo" src="${logoSrc}" />
-    <div class="company-top-address">
-      ${companyAddressLines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}
-    </div>
-  </header>
-
-  <footer class="doc-footer">
-    <div class="footer-left">
-      ${
-        /*
-      <div class="company-name">PT PCBA Semiconductor International</div>
-      <div><span class="label">NPWP:</span> 053077610321500</div>
-      <div><span class="label">Bank:</span> OCBC</div>
-      <div><span class="label">Account:</span> 090800031321</div>
-      <div><span class="label">Swift Code:</span> NISPIDJA</div>
-       ""
-      
-    </div>
-
-    <div class="footer-right">
-      <div><a class="website">www.psiglobaltech.com</a></div>
-      <div class="page-number"></div>
-    </div>
-  </footer>
-  */ ""
-  }
-
   <table class="page-container">
-     ${
-       /*
-    <thead>
-      <tr>
-        <td>
-          <div class="header-space"></div>
-        </td>
-      </tr>
-    </thead>
-    */ ""
-     }
-
     <tbody>
       <tr>
         <td>
@@ -872,18 +821,6 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
         </td>
       </tr>
     </tbody>
-
-    ${
-      /*
-    <tfoot>
-      <tr>
-        <td>
-          <div class="footer-space"></div>
-        </td>
-      </tr>
-    </tfoot>
-    */ ""
-    }
   </table>
 </body>
 </html>`;
@@ -942,6 +879,16 @@ function renderRemarksWithSignature(note?: string, signerImageSrc?: string): str
   `;
 }
 
+/**
+ * Renders an HTML string to a PDF buffer via Playwright/Chromium.
+ *
+ * All document templates use Playwright's native `displayHeaderFooter`
+ * mechanism with the standardized header template generated by {@link handleHeader}
+ * and the company footer template.
+ *
+ * @param html            - Full HTML document string to render.
+ * @param headerTemplate  - Playwright header template HTML string.
+ */
 async function renderHtmlToPdf(html: string, headerTemplate?: string): Promise<Buffer> {
   const browser = await chromium.launch({
     args: ["--no-sandbox"],
@@ -954,17 +901,14 @@ async function renderHtmlToPdf(html: string, headerTemplate?: string): Promise<B
       waitUntil: "networkidle",
     });
 
-    const footerTemplate = `
+    const playwrightFooterTemplate = `
       <div style="position: relative; width: calc(100% - 8mm); height: 22mm; margin: 0 4mm 4mm 4mm; padding-top: 2mm; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #222; border-top: 1px solid #ddd; box-sizing: border-box;">
-        
-        <!-- Left side content (Left empty to match your commented-out block) -->
+        <!-- left side intentionally empty -->
         <div style="position: absolute; left: 0; bottom: 0; width: 95mm; line-height: 1.45;"></div>
-        
         <div style="position: absolute; right: 0; bottom: 1mm; width: 60mm; text-align: right; line-height: 1.45;">
           <div style="color: #0000aa; font-weight: 700;">www.psiglobaltech.com</div>
           <div style="color: #777;">Page <span class="pageNumber"></span> / <span class="totalPages"></span></div>
         </div>
-        
       </div>
     `;
 
@@ -973,12 +917,12 @@ async function renderHtmlToPdf(html: string, headerTemplate?: string): Promise<B
       printBackground: true,
       preferCSSPageSize: true,
       displayHeaderFooter: true,
-      headerTemplate: headerTemplate,
-      footerTemplate: footerTemplate,
+      headerTemplate: headerTemplate || "<span></span>",
+      footerTemplate: playwrightFooterTemplate,
       margin: {
-        top: "40mm", // 8mm top margin + 28mm header height
-        bottom: "30mm", // 4mm bottom margin + 22mm footer height
-        left: "0", // Keep 0 because your template handles the 4mm padding internally
+        top: "40mm", // 8mm top margin + 28mm header height + 4mm breathing room
+        bottom: "30mm", // 4mm bottom margin + 22mm footer height + 4mm breathing room
+        left: "0",
         right: "0",
       },
     });
@@ -989,51 +933,10 @@ async function renderHtmlToPdf(html: string, headerTemplate?: string): Promise<B
   }
 }
 
-function renderDocumentHeader(logoSrc: string, companyAddressLines: string[]): string {
-  return `
-  <header class="doc-header">
-    <img class="logo" src="${logoSrc}" />
-    <div class="company-top-address">
-      ${companyAddressLines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}
-    </div>
-  </header>`;
-}
-
-function renderDocumentFooter(): string {
-  return `
-  <footer class="doc-footer">
-    <div class="footer-left">
-      ${
-        /*
-      <div class="company-name">PT PCBA Semiconductor International</div>
-      <div><span class="label">NPWP:</span> 053077610321500</div>
-      <div><span class="label">Bank:</span> OCBC</div>
-      <div><span class="label">Account:</span> 090800031321</div>
-      <div><span class="label">Swift Code:</span> NISPIDJA</div>
-      */ ""
-      }
-    </div>
-    <div class="footer-right">
-      <div><a class="website">www.psiglobaltech.com</a></div>
-      <div class="page-number"></div>
-    </div>
-  </footer>`;
-}
-
 function renderQuoteHtml(data: SaleOrderData, isSale: boolean): string {
-  const { document, partner, company, groupedLines } = data;
-  // Cast to OdooSaleOrder to access sale-order-specific fields
+  const { document, partner, groupedLines } = data;
   const order = document as OdooSaleOrder;
-
-  // const quotationLabel = order.state === "draft" || order.state === "sent" ? "Quotation #" : "Order #";
   const quotationLabel = isSale ? "Sale Order #" : "Quotation #";
-
-  const companyName = company?.name || "PT PCBA Semiconductor International";
-
-  const logoSrc = company?.logo ? `data:image/png;base64,${company.logo}` : "/assets/psi-logo.png";
-
-  const companyAddressLines = [companyName, company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia`];
-
   const partnerAddressLines = getPartnerAddressLines(partner);
 
   return `<!doctype html>
@@ -1045,7 +948,6 @@ function renderQuoteHtml(data: SaleOrderData, isSale: boolean): string {
   <style>
     @page {
       size: A4;
-      margin: 0;
     }
 
     * {
@@ -1065,30 +967,6 @@ function renderQuoteHtml(data: SaleOrderData, isSale: boolean): string {
       background: #ffffff;
     }
 
-    /* --- FIXED HEADERS AND FOOTERS --- */
-    .doc-header {
-      position: fixed;
-      top: 8mm;
-      left: 4mm;
-      right: 4mm;
-      height: 28mm;
-      z-index: 20;
-    }
-
-    .doc-footer {
-      position: fixed;
-      left: 4mm;
-      right: 4mm;
-      bottom: 4mm;
-      height: 22mm;
-      z-index: 20;
-      font-size: 12px;
-      background: #fff;
-      border-top: 1px solid #ddd;
-      padding-top: 2mm;
-    }
-
-    /* --- TABLE STRUCTURAL SPACERS */
     .page-container {
       width: 100%;
       border-collapse: collapse;
@@ -1101,17 +979,8 @@ function renderQuoteHtml(data: SaleOrderData, isSale: boolean): string {
       padding: 0;
       border: none;
     }
-
-    .header-space {
-      height: 40mm; /* 8mm top + 28mm height + 4mm breathing room */
-    }
-
-    .footer-space {
-      height: 30mm; /* 4mm bottom + 22mm height + 4mm breathing room */
-    }
-
     .document-body {
-      padding: 0 4mm; /* Top/Bottom padding removed; handled by spacers */
+      padding: 0 4mm;
     }
 
     /* --- REMAINING STYLES --- */
@@ -1376,41 +1245,7 @@ function renderQuoteHtml(data: SaleOrderData, isSale: boolean): string {
 </head>
 
 <body>
-  <header class="doc-header">
-    <img class="logo" src="${logoSrc}" />
-    <div class="company-top-address">
-      ${companyAddressLines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}
-    </div>
-  </header>
-
-  <footer class="doc-footer">
-    <div class="footer-left">
-      ${
-        /*
-      <div class="company-name">PT PCBA Semiconductor International</div>
-      <div><span class="label">NPWP:</span> 053077610321500</div>
-      <div><span class="label">Bank:</span> OCBC</div>
-      <div><span class="label">Account:</span> 090800031321</div>
-      <div><span class="label">Swift Code:</span> NISPIDJA</div>
-      */ ""
-      }
-    </div>
-
-    <div class="footer-right">
-      <div><a class="website">www.psiglobaltech.com</a></div>
-      <div class="page-number"></div>
-    </div>
-  </footer>
-
   <table class="page-container">
-    <thead>
-      <tr>
-        <td>
-          <div class="header-space"></div>
-        </td>
-      </tr>
-    </thead>
-    
     <tbody>
       <tr>
         <td>
@@ -1533,25 +1368,13 @@ function renderQuoteHtml(data: SaleOrderData, isSale: boolean): string {
         </td>
       </tr>
     </tbody>
-    
-    <tfoot>
-      <tr>
-        <td>
-          <div class="footer-space"></div>
-        </td>
-      </tr>
-    </tfoot>
   </table>
 </body>
 </html>`;
 }
 
 function renderInvoiceHtml(data: DocumentData<OdooInvoice, OdooInvoiceLine>): string {
-  const { document, partner, company, groupedLines } = data;
-
-  const companyName = company?.name || "PT PCBA Semiconductor International";
-  const logoSrc = company?.logo ? `data:image/png;base64,${company.logo}` : "/assets/psi-logo.png";
-  const companyAddressLines = [companyName, company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia`];
+  const { document, partner, groupedLines } = data;
   const partnerAddressLines = getPartnerAddressLines(partner);
 
   return `<!doctype html>
@@ -1560,7 +1383,7 @@ function renderInvoiceHtml(data: DocumentData<OdooInvoice, OdooInvoiceLine>): st
       <meta charset="utf-8" />
       <title>${escapeHtml(document.name)}</title>
       <style>
-        @page { size: A4; margin: 0; }
+        @page { size: A4; }
         * { box-sizing: border-box; }
         html, body {
           margin: 0; padding: 0; color: #222;
@@ -1570,14 +1393,10 @@ function renderInvoiceHtml(data: DocumentData<OdooInvoice, OdooInvoiceLine>): st
           print-color-adjust: exact;
           background: #ffffff;
         }
-        .doc-header { position: fixed; top: 8mm; left: 4mm; right: 4mm; height: 28mm; z-index: 20; }
-        .doc-footer { position: fixed; left: 4mm; right: 4mm; bottom: 4mm; height: 22mm; z-index: 20; font-size: 12px; background: #fff; border-top: 1px solid #ddd; padding-top: 2mm; }
         .page-container { width: 100%; border-collapse: collapse; border: none; }
         .page-container > thead > tr > td,
         .page-container > tbody > tr > td,
         .page-container > tfoot > tr > td { padding: 0; border: none; }
-        .header-space { height: 40mm; }
-        .footer-space { height: 30mm; }
         .document-body { padding: 0 4mm; }
         .logo { position: absolute; top: 0; left: 0; width: 48mm; height: auto; max-height: 14mm; object-fit: contain; }
         .company-top-address { position: absolute; top: 0; right: 0; width: 78mm; text-align: right; font-size: 13px; line-height: 1.35; }
@@ -1667,10 +1486,7 @@ function renderInvoiceHtml(data: DocumentData<OdooInvoice, OdooInvoiceLine>): st
       </style>
     </head>
     <body>
-      ${renderDocumentHeader(logoSrc, companyAddressLines)}
-      ${renderDocumentFooter()}
       <table class="page-container">
-        <thead><tr><td><div class="header-space"></div></td></tr></thead>
         <tbody>
           <tr><td>
             <main class="document-body">
@@ -1771,7 +1587,6 @@ function renderInvoiceHtml(data: DocumentData<OdooInvoice, OdooInvoiceLine>): st
             </main>
           </td></tr>
         </tbody>
-        <tfoot><tr><td><div class="footer-space"></div></td></tr></tfoot>
       </table>
     </body>
   </html>`;
@@ -1781,7 +1596,6 @@ function renderPurchaseOrderHtml(data: DocumentData<OdooPurchaseOrder, OdooPurch
   const { document, partner, company, groupedLines } = data;
 
   const companyName = company?.name || "PT PCBA Semiconductor International";
-  const logoSrc = company?.logo ? `data:image/png;base64,${company.logo}` : "/assets/psi-logo.png";
   const companyAddressLines = [companyName, company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia`];
   const partnerAddressLines = getPartnerAddressLines(partner);
 
@@ -1791,7 +1605,7 @@ function renderPurchaseOrderHtml(data: DocumentData<OdooPurchaseOrder, OdooPurch
       <meta charset="utf-8" />
       <title>${escapeHtml(document.name)}</title>
       <style>
-        @page { size: A4; margin: 0; }
+        @page { size: A4; }
         * { box-sizing: border-box; }
         html, body {
           margin: 0; padding: 0; color: #222;
@@ -1801,14 +1615,10 @@ function renderPurchaseOrderHtml(data: DocumentData<OdooPurchaseOrder, OdooPurch
           print-color-adjust: exact;
           background: #ffffff;
         }
-        .doc-header { position: fixed; top: 8mm; left: 4mm; right: 4mm; height: 28mm; z-index: 20; }
-        .doc-footer { position: fixed; left: 4mm; right: 4mm; bottom: 4mm; height: 22mm; z-index: 20; font-size: 12px; background: #fff; border-top: 1px solid #ddd; padding-top: 2mm; }
         .page-container { width: 100%; border-collapse: collapse; border: none; }
         .page-container > thead > tr > td,
         .page-container > tbody > tr > td,
         .page-container > tfoot > tr > td { padding: 0; border: none; }
-        .header-space { height: 40mm; }
-        .footer-space { height: 30mm; }
         .document-body { padding: 0 4mm; }
         .logo { position: absolute; top: 0; left: 0; width: 48mm; height: auto; max-height: 14mm; object-fit: contain; }
         .company-top-address { position: absolute; top: 0; right: 0; width: 78mm; text-align: right; font-size: 13px; line-height: 1.35; }
@@ -1937,10 +1747,7 @@ function renderPurchaseOrderHtml(data: DocumentData<OdooPurchaseOrder, OdooPurch
       </style>
     </head>
     <body>
-      ${renderDocumentHeader(logoSrc, companyAddressLines)}
-      ${renderDocumentFooter()}
       <table class="page-container">
-        <thead><tr><td><div class="header-space"></div></td></tr></thead>
         <tbody>
           <tr><td>
             <main class="document-body">
@@ -2023,7 +1830,6 @@ function renderPurchaseOrderHtml(data: DocumentData<OdooPurchaseOrder, OdooPurch
             </main>
           </td></tr>
         </tbody>
-        <tfoot><tr><td><div class="footer-space"></div></td></tr></tfoot>
       </table>
     </body>
   </html>`;
