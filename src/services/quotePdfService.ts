@@ -284,14 +284,14 @@ export function handleHeader(companyOrData?: { company?: OdooCompany | null } | 
 function buildPlaywrightHeaderTemplate(company: OdooCompany | null): string {
   const companyName = company?.name || "PT PCBA Semiconductor International";
   const logoSrc = getCompanyLogoSrc(company);
-  const companyAddressLines = [company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia`];
-  const branchCompanyAddressLines = ["Ruko Tanamera Waterfront Estates No. A02 Cibatu, Cikarang 17530, Indonesia"];
+  const companyAddressLines = [company?.street || "Jl Raden Fatah No 6&7", `${company?.city || "Batam City"} ${company?.zip || "29444"}, Indonesia.`];
+  const branchCompanyAddressLines = ["Ruko Tanamera Waterfront Estates No. A02 Cibatu, Cikarang 17530."];
 
   return `
   <div style="position: relative; width: 100%; height: 28mm; padding: 0 4mm; font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #222; box-sizing: border-box;">
     ${logoSrc ? `<img src="${logoSrc}" style="position: absolute; top: 0; left: 4mm; width: 48mm; height: auto; max-height: 14mm; object-fit: contain;" />` : ""}
     <div style="position: absolute; top: 0; right: 4mm; width: 78mm; text-align: left; line-height: 1.35;">
-      <div>${escapeHtml(companyName)}</div>
+      <div><b>${escapeHtml(companyName)}</b></div>
       <div>
         <b>Head Office: </b>${companyAddressLines.map((line) => `${escapeHtml(line)}`).join("<br>")}  
       </div>
