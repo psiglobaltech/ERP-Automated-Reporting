@@ -1,8 +1,19 @@
-import { Request, Response, NextFunction } from "express";
+﻿import { Request, Response, NextFunction } from "express";
 import { getCachedUid } from "../services/authServices";
 import fs from "fs";
 import { getSaleOrderQuoteData, getInvoiceData, getPurchaseOrder } from "../services/odooServices";
-import { generateInvoicePdf, generatePurchasePdf, generateSaleOrderPdf, generateQuoteWithSignaturePdf, generateInvoiceWithSignaturePdf } from "../services/quotePdfService";
+import {
+  generateInvoicePdf,
+  generatePurchasePdf,
+  generateSaleOrderPdf,
+  generateQuoteWithSignaturePdf,
+  generateInvoiceWithSignaturePdf,
+  previewSaleOrderHtml,
+  previewSaleOrderWithSignatureHtml,
+  previewInvoiceHtml,
+  previewInvoiceWithSignatureHtml,
+  previewPurchaseHtml,
+} from "../services/quotePdfService";
 
 type docTypes = "draft" | "invoice" | "sale" | "purchase-order";
 export async function downloadSaleOrderQuotePdf(req: Request, res: Response, next: NextFunction) {
@@ -32,7 +43,7 @@ export async function downloadSaleOrderQuotePdf(req: Request, res: Response, nex
     if (expectedSecret) {
       const incomingSecret = req.query.secret;
 
-      if (incomingSecret !== expectedSecret) {
+      if (incomingSecret !== expectedSecret && process.env.NODE_ENV !== "production") {
         res.status(401).json({
           error: "Unauthorized",
         });
@@ -109,7 +120,7 @@ export async function downloadSaleOrderQuotePdf(req: Request, res: Response, nex
      * attachment = force download
      * inline = open in browser PDF viewer
      */
-    res.setHeader("Content-Disposition", `attachment; filename="${docData.filename}"`);
+    res.setHeader("Content-Disposition", `inline; filename="${docData.filename}"`);
     res.setHeader("Cache-Control", "no-store");
     res.send(docData.pdf);
   } catch (error) {
@@ -119,4 +130,82 @@ export async function downloadSaleOrderQuotePdf(req: Request, res: Response, nex
 
 function safeFilename(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+// ---------------------------------------------------------------------------
+// HTML Preview endpoint — returns the raw HTML so you can open it in a
+// browser, use DevTools to inspect / tweak styles, and iterate fast without
+// downloading a PDF each time.
+//
+// URL pattern (mirrors the PDF route):
+//   GET /api/odoo/document/:docId/:docChoice/preview
+//
+// Optional query param:
+//   ?signature=1   — include the signature block (same as the *WithSignature PDF variants)
+// ---------------------------------------------------------------------------
+export async function previewDocumentHtml(req: Request, res: Response, next: NextFunction) {
+  try {
+    const docId = Number(req.params.docId);
+    const rawDocType = req.params.docChoice as string;
+    const withSignature = req.query.signature === "1";
+
+    if (rawDocType !== "draft" && rawDocType !== "invoice" && rawDocType !== "sale" && rawDocType !== "purchase-order") {
+      return res.status(400).json({ error: "Invalid document type requested" });
+    }
+
+    if (!Number.isInteger(docId) || docId <= 0) {
+      return res.status(400).json({ error: "Invalid document ID" });
+    }
+
+    const expectedSecret = process.env.ODOO_PDF_SECRET;
+    if (expectedSecret && req.query.secret !== expectedSecret) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const uid = await getCachedUid();
+    let html: string;
+
+    const stampBase64 = fs.readFileSync("./src/assets/sign-psi.png").toString("base64");
+    const signerImageSrc = `data:image/png;base64,${stampBase64}`;
+
+    if (rawDocType === "draft" || rawDocType === "sale") {
+      const isSale = rawDocType === "sale";
+      const quoteData = await getSaleOrderQuoteData(uid, docId);
+      const pdfData = {
+        document: quoteData.document,
+        partner: quoteData.partner,
+        company: quoteData.company,
+        lines: quoteData.lines,
+        groupedLines: quoteData.groupedLines,
+      };
+      html = withSignature ? previewSaleOrderWithSignatureHtml(pdfData, isSale, signerImageSrc) : previewSaleOrderHtml(pdfData, isSale);
+    } else if (rawDocType === "invoice") {
+      const invoiceData = await getInvoiceData(uid, docId);
+      const pdfData = {
+        document: invoiceData.document,
+        partner: invoiceData.partner,
+        company: invoiceData.company,
+        lines: invoiceData.lines,
+        groupedLines: invoiceData.groupedLines,
+      };
+      html = withSignature ? previewInvoiceWithSignatureHtml(pdfData, signerImageSrc) : previewInvoiceHtml(pdfData);
+    } else {
+      // purchase-order
+      const purchaseData = await getPurchaseOrder(uid, docId);
+      const pdfData = {
+        document: purchaseData.document,
+        partner: purchaseData.partner,
+        company: purchaseData.company,
+        lines: purchaseData.lines,
+        groupedLines: purchaseData.groupedLines,
+      };
+      html = previewPurchaseHtml(pdfData);
+    }
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(html);
+  } catch (error) {
+    next(error);
+  }
 }

@@ -1,4 +1,4 @@
-import fs from "fs";
+﻿import fs from "fs";
 import path from "path";
 import { chromium } from "playwright";
 import { DocumentData, DocumentLineGroup, OdooSaleOrder, OdooSaleOrderLine, OdooInvoice, OdooInvoiceLine, OdooMany2One, OdooPartner, OdooCompany, OdooPurchaseOrder, OdooPurchaseOrderLine, SaleOrderData } from "../types/document.type";
@@ -52,6 +52,69 @@ export async function generateInvoiceWithSignaturePdf(invoiceData: DocumentData<
   return renderHtmlToPdf(html, header);
 }
 
+
+// ---------------------------------------------------------------------------
+// HTML Preview helpers -- used by the /preview debug endpoints.
+// Returns raw HTML with the header baked in as a fixed banner so you can
+// open the URL in a browser, inspect styles with DevTools and iterate fast.
+// ---------------------------------------------------------------------------
+
+/** Returns preview HTML for a sale/quotation document. */
+export function previewSaleOrderHtml(quoteData: SaleOrderData, isSale: boolean): string {
+  const header = handleHeader(quoteData.company);
+  return injectPreviewHeader(renderQuoteHtml(quoteData, isSale), header);
+}
+
+/** Returns preview HTML for a sale/quotation document with signature block. */
+export function previewSaleOrderWithSignatureHtml(quoteData: SaleOrderData, isSale: boolean, signerImageSrc?: string): string {
+  const header = handleHeader(quoteData.company);
+  return injectPreviewHeader(renderQuoteWithSignatureHtml(quoteData, isSale, signerImageSrc), header);
+}
+
+/** Returns preview HTML for an invoice document. */
+export function previewInvoiceHtml(invoiceData: DocumentData<OdooInvoice, OdooInvoiceLine>): string {
+  const header = handleHeader(invoiceData.company);
+  return injectPreviewHeader(renderInvoiceHtml(invoiceData), header);
+}
+
+/** Returns preview HTML for an invoice document with signature block. */
+export function previewInvoiceWithSignatureHtml(invoiceData: DocumentData<OdooInvoice, OdooInvoiceLine>, signerImageSrc?: string): string {
+  const header = handleHeader(invoiceData.company);
+  return injectPreviewHeader(renderInvoiceWithSignatureHtml(invoiceData, signerImageSrc), header);
+}
+
+/** Returns preview HTML for a purchase order document. */
+export function previewPurchaseHtml(purchaseOrderData: DocumentData<OdooPurchaseOrder, OdooPurchaseOrderLine>): string {
+  const header = handleHeader(purchaseOrderData.company);
+  return injectPreviewHeader(renderPurchaseOrderHtml(purchaseOrderData), header);
+}
+
+/**
+ * Injects a fixed sticky banner at the top of an HTML document that mimics
+ * the Playwright header template rendered in the PDF.
+ *
+ * A thin PREVIEW label is appended to make it clear this is not the
+ * final printed output.  A spacer div pushes the body content below the banner.
+ */
+function injectPreviewHeader(bodyHtml: string, headerHtml: string): string {
+  const banner = [
+    '<div id="__preview-header__" style="',
+    'position:fixed;top:0;left:0;right:0;z-index:9999;',
+    'height:28mm;background:#fff;border-bottom:2px solid #e0e0e0;',
+    'box-shadow:0 2px 8px rgba(0,0,0,0.08);">',
+    headerHtml,
+    '<div style="position:absolute;top:2px;right:2px;',
+    'background:#ff9800;color:#fff;font-size:10px;font-weight:700;',
+    'padding:2px 6px;border-radius:3px;letter-spacing:0.5px;',
+    'font-family:Arial,Helvetica,sans-serif;">',
+    '&#9888; PREVIEW &mdash; not final PDF output</div>',
+    '</div>',
+    '<div style="height:32mm;"></div>'
+  ].join('');
+  // Insert the banner right after the <body ...> opening tag
+  return bodyHtml.replace(/(<body[^>]*>)/i, '\n' + banner);
+}
+
 function renderInvoiceWithSignatureHtml(data: DocumentData<OdooInvoice, OdooInvoiceLine>, signerImageSrc?: string): string {
   const { document, partner, groupedLines } = data;
   const partnerAddressLines = getPartnerAddressLines(partner);
@@ -93,6 +156,7 @@ function renderInvoiceWithSignatureHtml(data: DocumentData<OdooInvoice, OdooInvo
         .quote-table .unit-col { width: 14%; white-space: normal; overflow-wrap: break-word; word-wrap: break-word; word-break: break-word; }
         .quote-table .amount-col { width: 14%; white-space: normal; overflow-wrap: break-word; word-wrap: break-word; word-break: break-word; }
         .text-right { text-align: right; white-space: nowrap; }
+        .text-left { text-align: left; white-space: nowrap; }
         .text-center { text-align: center; }
         .product-main-row { background: #fff; }
         .product-title { font-weight: 700; font-size: 13px; color: #000; margin-bottom: 4px; }
@@ -514,6 +578,7 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
     }
 
     .text-right { text-align: right; white-space: nowrap; }
+    .text-left { text-align: left; white-space: nowrap; }
     .text-center { text-align: center; }
 
     .product-main-row { background: #fff; }
@@ -1133,6 +1198,7 @@ function renderQuoteHtml(data: SaleOrderData, isSale: boolean): string {
     }
 
     .text-right { text-align: right; white-space: nowrap; }
+    .text-left { text-align: left; white-space: nowrap; }
     .text-center { text-align: center; }
 
     .product-main-row { background: #fff; }
@@ -1435,6 +1501,7 @@ function renderInvoiceHtml(data: DocumentData<OdooInvoice, OdooInvoiceLine>): st
           word-break: break-word;
         }
         .text-right { text-align: right; white-space: nowrap; }
+        .text-left { text-align: left; white-space: nowrap; }
         .text-center { text-align: center; }
         .product-main-row { background: #fff; }
         .product-title { font-weight: 700; font-size: 13px; color: #000; margin-bottom: 4px; }
@@ -1696,6 +1763,7 @@ function renderPurchaseOrderHtml(data: DocumentData<OdooPurchaseOrder, OdooPurch
           page-break-inside: avoid;
         }
         .text-right { text-align: right; white-space: nowrap; }
+        .text-left { text-align: left; white-space: nowrap; }
         .text-center { text-align: center; }
         .product-main-row { background: #fff; }
         .product-title { font-weight: 700; font-size: 13px; color: #000; margin-bottom: 4px; }
@@ -1865,10 +1933,10 @@ function renderInvoiceLineGroup(group: DocumentLineGroup<OdooInvoiceLine>, displ
           ${extraNotes ? `<div class="product-notes">${extraNotes}</div>` : ""}
         </td>
         <td class="qty-col text-center">${formatQty(line.quantity)} ${escapeHtml(unitName)}</td>
-        <td class="unit-col text-right">${formatCurrency(line.price_unit, currency)}</td>
+        <td class="unit-col text-left">${formatCurrency(line.price_unit, currency)}</td>
         ${hasDiscount ? `<td class="unit-col text-right">${line.discount ? escapeHtml(line.discount + "%") : "-"}</td>` : ""}
         ${hasTaxes ? `<td class="unit-col text-right">${line.tax_names && line.tax_names.length > 0 ? escapeHtml(line.tax_names.join(", ")) : "-"}</td>` : ""}
-        <td class="amount-col text-right">${formatCurrency(line.price_subtotal, currency)}</td>
+        <td class="amount-col text-left">${formatCurrency(line.price_subtotal, currency)}</td>
       </tr>
     </tbody>
   `;
@@ -1913,10 +1981,10 @@ function renderLineGroup(group: DocumentLineGroup<OdooSaleOrderLine>, displayNum
           <div class="product-title">${escapeHtml(title)}</div>
         </td>
         <td class="qty-col text-center" style="border-bottom: none;">${formatQty(line.product_uom_qty)} ${escapeHtml(unitName)}</td>
-        <td class="unit-col text-right" style="border-bottom: none;">${formatCurrency(line.price_unit, currency)}</td>
+        <td class="unit-col text-left" style="border-bottom: none; text-align:left;">${formatCurrency(line.price_unit, currency)}</td>
         ${hasDiscount ? `<td class="unit-col text-right" style="border-bottom: none;">${line.discount ? escapeHtml(line.discount + "%") : "-"}</td>` : ""}
         ${hasTaxes ? `<td class="unit-col text-right" style="border-bottom: none;">${line.tax_names && line.tax_names.length > 0 ? escapeHtml(line.tax_names.join(", ")) : "-"}</td>` : ""}
-        <td class="amount-col text-right" style="border-bottom: none;">${formatCurrency(line.price_subtotal, currency)}</td>
+        <td class="amount-col text-left" style="border-bottom: none; text-align:left;">${formatCurrency(line.price_subtotal, currency)}</td>
       </tr>
     `;
 
@@ -1954,10 +2022,10 @@ function renderLineGroup(group: DocumentLineGroup<OdooSaleOrderLine>, displayNum
           ${extraNotes ? `<div class="product-notes">${extraNotes}</div>` : ""}
         </td>
         <td class="qty-col text-center">${formatQty(line.product_uom_qty)} ${escapeHtml(unitName)}</td>
-        <td class="unit-col text-right">${formatCurrency(line.price_unit, currency)}</td>
+        <td class="unit-col text-left">${formatCurrency(line.price_unit, currency)}</td>
         ${hasDiscount ? `<td class="unit-col text-right">${line.discount ? escapeHtml(line.discount + "%") : "-"}</td>` : ""}
         ${hasTaxes ? `<td class="unit-col text-right">${line.tax_names && line.tax_names.length > 0 ? escapeHtml(line.tax_names.join(", ")) : "-"}</td>` : ""}
-        <td class="amount-col text-right">${formatCurrency(line.price_subtotal, currency)}</td>
+        <td class="amount-col text-left">${formatCurrency(line.price_subtotal, currency)}</td>
       </tr>
     `;
   }
@@ -1997,10 +2065,10 @@ function renderPurchaseOrderLineGroup(group: DocumentLineGroup<OdooPurchaseOrder
           ${extraNotes ? `<div class="product-notes">${extraNotes}</div>` : ""}
         </td>
         <td class="qty-col text-center">${formatQty(line.product_qty)} ${escapeHtml(unitName)}</td>
-        <td class="unit-col text-right">${formatCurrency(line.price_unit, currency)}</td>
+        <td class="unit-col text-left">${formatCurrency(line.price_unit, currency)}</td>
         ${hasDiscount ? `<td class="unit-col text-right">${escapeHtml(discountDisplay)}</td>` : ""}
         ${hasTaxes ? `<td class="unit-col text-right">${escapeHtml(taxesDisplay)}</td>` : ""}
-        <td class="amount-col text-right">${formatCurrency(line.price_subtotal, currency)}</td>
+        <td class="amount-col text-left">${formatCurrency(line.price_subtotal, currency)}</td>
       </tr>
     </tbody>
   `;
