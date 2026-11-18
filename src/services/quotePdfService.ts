@@ -2146,16 +2146,24 @@ export function getPartnerAddressLines(partner: OdooPartner | null): string[] {
     header.push(person);
   }
 
-  const address: string[] = [];
+  // Connect city, state, and zip
+  const cityStateZip = [
+    typeof partner.city === "string" ? partner.city.trim() : "",
+    partner.state_id ? m2oName(partner.state_id).trim() : "",
+    typeof partner.zip === "string" ? partner.zip.trim() : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
-  if (partner.street) address.push(partner.street);
-  if (partner.street2) address.push(partner.street2);
+  // Connect all address components continuing with comma from street
+  const addressParts = [
+    typeof partner.street === "string" ? partner.street.trim() : "",
+    typeof partner.street2 === "string" ? partner.street2.trim() : "",
+    cityStateZip,
+    partner.country_id ? m2oName(partner.country_id).trim() : "",
+  ].filter(Boolean);
 
-  const cityLine = [partner.city, partner.state_id ? m2oName(partner.state_id) : "", partner.zip].filter(Boolean).join(" ");
-
-  if (cityLine) address.push(cityLine);
-
-  if (partner.country_id) address.push(m2oName(partner.country_id));
+  const address = addressParts.length > 0 ? [addressParts.join(", ")] : [];
 
   if (address.length === 0 && partner.contact_address) {
     // Odoo's formatted address repeats the company name first; the header above already has it.
@@ -2164,7 +2172,9 @@ export function getPartnerAddressLines(partner: OdooPartner | null): string[] {
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line && !alreadyShown.has(line));
-    return [...header, ...fallback];
+    if (fallback.length > 0) {
+      return [...header, fallback.join(", ")];
+    }
   }
 
   return [...header, ...address];
