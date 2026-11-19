@@ -1,4 +1,4 @@
-import fs from "fs";
+﻿import fs from "fs";
 import path from "path";
 import { chromium } from "playwright";
 import { DocumentData, DocumentLineGroup, OdooSaleOrder, OdooSaleOrderLine, OdooInvoice, OdooInvoiceLine, OdooMany2One, OdooPartner, OdooCompany, OdooPurchaseOrder, OdooPurchaseOrderLine, SaleOrderData } from "../types/document.type";
@@ -378,7 +378,7 @@ function renderQuoteWithSignatureHtml(data: SaleOrderData, isSale: boolean, sign
   const { document, partner, groupedLines } = data;
   const order = document as OdooSaleOrder;
 
-  const quotationLabel = isSale ? "Sale Order #" : "Quotation #";
+  const quotationLabel = isSale ? "Sale Order" : "Quotation";
   const partnerAddressLines = getPartnerAddressLines(partner);
   const hasPartNumber = Boolean(
     data.hasPartNumber ??
